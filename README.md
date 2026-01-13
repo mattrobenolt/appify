@@ -70,7 +70,10 @@ exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
     --command='<your-command>' \
     --quit-after-last-window-closed=true \
     --window-save-state=never \
-    --confirm-close-surface=false
+    --confirm-close-surface=false \
+    --keybind=super+t=unbind \
+    --keybind=super+d=unbind \
+    --keybind=super+shift+d=unbind
 ```
 
 The `.app` bundle includes:
@@ -84,6 +87,10 @@ The `.app` bundle includes:
 - The app appears in Dock and Cmd+Tab with **your chosen name** (e.g., "LazyGit", not "Ghostty")
 - Each wrapped app is a distinct entry in Cmd+Tab
 - Custom icons (if provided) are displayed in Dock and Cmd+Tab
+- Disables tab and split creation keybinds for a cleaner single-window experience:
+  - Cmd+T (new tab) disabled
+  - Cmd+D (split right) disabled
+  - Cmd+Shift+D (split down) disabled
 
 **Note:** The macOS menu bar will still display "Ghostty" as this is controlled by Ghostty's internal code, not the wrapper.
 

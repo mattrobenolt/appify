@@ -35,6 +35,9 @@ grep -q "exec /Applications/Ghostty.app/Contents/MacOS/ghostty" /tmp/TestApp.app
 grep -q "title='TestApp'" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Window title not set"; exit 1; }
 grep -q "/bin/echo" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Command missing"; exit 1; }
 grep -q "confirm-close-surface=false" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: No-confirm flag missing"; exit 1; }
+grep -q "keybind=super+t=unbind" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Tab keybind unbind missing"; exit 1; }
+grep -q "keybind=super+d=unbind" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Split-right keybind unbind missing"; exit 1; }
+grep -q "keybind=super+shift+d=unbind" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Split-down keybind unbind missing"; exit 1; }
 echo "  ✓ Launcher script contains correct content"
 
 # Test 4: Custom bundle ID

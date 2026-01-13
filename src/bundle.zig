@@ -120,7 +120,10 @@ fn writeLauncherScript(allocator: Allocator, launcher_path: []const u8, command:
         \\    --command='{s}' \
         \\    --quit-after-last-window-closed=true \
         \\    --window-save-state=never \
-        \\    --confirm-close-surface=false
+        \\    --confirm-close-surface=false \
+        \\    --keybind=super+t=unbind \
+        \\    --keybind=super+d=unbind \
+        \\    --keybind=super+shift+d=unbind
         \\
     ,
         .{ app_name, command },
@@ -155,7 +158,10 @@ test "launcher script generation" {
         \\    --command='{s}' \
         \\    --quit-after-last-window-closed=true \
         \\    --window-save-state=never \
-        \\    --confirm-close-surface=false
+        \\    --confirm-close-surface=false \
+        \\    --keybind=super+t=unbind \
+        \\    --keybind=super+d=unbind \
+        \\    --keybind=super+shift+d=unbind
         \\
     ,
         .{ "LazyGit", "lazygit" },
@@ -181,6 +187,11 @@ test "launcher script generation" {
     try std.testing.expect(mem.indexOf(u8, script, "--quit-after-last-window-closed=true") != null);
     try std.testing.expect(mem.indexOf(u8, script, "--window-save-state=never") != null);
     try std.testing.expect(mem.indexOf(u8, script, "--confirm-close-surface=false") != null);
+
+    // Verify keybind unbindings for single-window mode
+    try std.testing.expect(mem.indexOf(u8, script, "--keybind=super+t=unbind") != null);
+    try std.testing.expect(mem.indexOf(u8, script, "--keybind=super+d=unbind") != null);
+    try std.testing.expect(mem.indexOf(u8, script, "--keybind=super+shift+d=unbind") != null);
 }
 
 test "launcher script with command containing spaces" {
@@ -196,7 +207,10 @@ test "launcher script with command containing spaces" {
         \\    --command='{s}' \
         \\    --quit-after-last-window-closed=true \
         \\    --window-save-state=never \
-        \\    --confirm-close-surface=false
+        \\    --confirm-close-surface=false \
+        \\    --keybind=super+t=unbind \
+        \\    --keybind=super+d=unbind \
+        \\    --keybind=super+shift+d=unbind
         \\
     ,
         .{ "My App", "/usr/local/bin/my app" },
