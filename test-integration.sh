@@ -32,6 +32,7 @@ echo "Test 3: Launcher script validation"
 grep -q "#!/bin/sh" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Shebang missing"; exit 1; }
 grep -q "osascript" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Activation script missing"; exit 1; }
 grep -q "exec /Applications/Ghostty.app/Contents/MacOS/ghostty" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Ghostty exec missing"; exit 1; }
+grep -q "title='TestApp'" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Window title not set"; exit 1; }
 grep -q "/bin/echo" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: Command missing"; exit 1; }
 grep -q "confirm-close-surface=false" /tmp/TestApp.app/Contents/MacOS/TestApp || { echo "FAIL: No-confirm flag missing"; exit 1; }
 echo "  ✓ Launcher script contains correct content"

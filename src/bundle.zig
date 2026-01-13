@@ -81,7 +81,7 @@ pub fn generate(allocator: Allocator, config: Config) !void {
     const launcher_path = try fs.path.join(allocator, &.{ macos_path, config.name });
     defer allocator.free(launcher_path);
 
-    try writeLauncherScript(allocator, launcher_path, config.command);
+    try writeLauncherScript(allocator, launcher_path, config.command, config.name);
 
     // Make launcher executable
     try makeExecutable(launcher_path);
@@ -109,20 +109,21 @@ fn createDirectoryStructure(allocator: Allocator, app_path: []const u8) !void {
 }
 
 /// Write the launcher shell script that directly executes Ghostty with the command.
-fn writeLauncherScript(allocator: Allocator, launcher_path: []const u8, command: []const u8) !void {
+fn writeLauncherScript(allocator: Allocator, launcher_path: []const u8, command: []const u8, app_name: []const u8) !void {
     const script = try std.fmt.allocPrint(
         allocator,
         \\#!/bin/sh
         \\# Activate this app to bring window to front
         \\osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
         \\exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
+        \\    --title='{s}' \
         \\    --command='{s}' \
         \\    --quit-after-last-window-closed=true \
         \\    --window-save-state=never \
         \\    --confirm-close-surface=false
         \\
     ,
-        .{command},
+        .{ app_name, command },
     );
     defer allocator.free(script);
 
@@ -150,13 +151,14 @@ test "launcher script generation" {
         \\# Activate this app to bring window to front
         \\osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
         \\exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
+        \\    --title='{s}' \
         \\    --command='{s}' \
         \\    --quit-after-last-window-closed=true \
         \\    --window-save-state=never \
         \\    --confirm-close-surface=false
         \\
     ,
-        .{"lazygit"},
+        .{ "LazyGit", "lazygit" },
     );
     defer allocator.free(script);
 
@@ -168,6 +170,9 @@ test "launcher script generation" {
 
     // Verify exec and Ghostty binary path
     try std.testing.expect(mem.indexOf(u8, script, "exec /Applications/Ghostty.app/Contents/MacOS/ghostty") != null);
+
+    // Verify title is set
+    try std.testing.expect(mem.indexOf(u8, script, "--title='LazyGit'") != null);
 
     // Verify command is present
     try std.testing.expect(mem.indexOf(u8, script, "'lazygit'") != null);
@@ -187,13 +192,14 @@ test "launcher script with command containing spaces" {
         \\# Activate this app to bring window to front
         \\osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
         \\exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
+        \\    --title='{s}' \
         \\    --command='{s}' \
         \\    --quit-after-last-window-closed=true \
         \\    --window-save-state=never \
         \\    --confirm-close-surface=false
         \\
     ,
-        .{"/usr/local/bin/my app"},
+        .{ "My App", "/usr/local/bin/my app" },
     );
     defer allocator.free(script);
 

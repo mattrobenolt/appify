@@ -66,6 +66,7 @@ Generated apps directly execute Ghostty with the specified command:
 # Activate this app to bring window to front
 osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
 exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
+    --title='<app-name>' \
     --command='<your-command>' \
     --quit-after-last-window-closed=true \
     --window-save-state=never \
