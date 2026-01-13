@@ -1,6 +1,6 @@
 # Zig Style Guide
 
-General Zig conventions and patterns. For alloconda-specific conventions, see [AGENTS.md](AGENTS.md).
+General Zig conventions and patterns.
 
 ## Zig Development
 

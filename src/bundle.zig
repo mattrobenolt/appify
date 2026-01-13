@@ -67,7 +67,7 @@ pub fn generate(allocator: Allocator, config: Config) !void {
         .has_icon = config.icon_path != null,
     };
 
-    try plist.generate(allocator, &plist_writer.interface, plist_config);
+    try plist.generate(&plist_writer.interface, plist_config);
 
     // Flush the buffered data to the file
     try plist_writer.end();

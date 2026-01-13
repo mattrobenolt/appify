@@ -6,6 +6,8 @@ const fs = std.fs;
 const mem = std.mem;
 const process = std.process;
 const Allocator = mem.Allocator;
+const builtin = @import("builtin");
+
 const bundle = @import("bundle.zig");
 
 const version = "0.1.0";
@@ -44,14 +46,22 @@ const ParsedArgs = struct {
     show_version: bool = false,
 };
 
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
 pub fn main() !void {
     // Set up allocator
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const gpa, const is_debug = gpa: {
+        break :gpa switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = debug_allocator.deinit();
+    };
 
     // Use arena for temporary CLI parsing allocations
-    var arena: std.heap.ArenaAllocator = .init(allocator);
+    var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
     const arena_allocator = arena.allocator();
 
@@ -107,7 +117,7 @@ pub fn main() !void {
     };
 
     // Generate the app bundle
-    bundle.generate(allocator, config) catch |err| {
+    bundle.generate(gpa, config) catch |err| {
         switch (err) {
             error.FileNotFound => {
                 try printError("file not found during bundle generation", .{});

@@ -2,7 +2,6 @@
 //! Generates properly formatted XML plists with standard app metadata.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
 pub const PlistConfig = struct {
     executable_name: []const u8,
@@ -13,9 +12,7 @@ pub const PlistConfig = struct {
 
 /// Generate an Info.plist file with the provided configuration.
 /// The writer parameter accepts any writer type (file, buffer, etc).
-pub fn generate(allocator: Allocator, writer: *std.Io.Writer, config: PlistConfig) !void {
-    _ = allocator; // Not currently needed, but kept for consistency
-
+pub fn generate(writer: *std.Io.Writer, config: PlistConfig) !void {
     // Write XML declaration and DOCTYPE
     try writer.writeAll(
         \\<?xml version="1.0" encoding="UTF-8"?>
@@ -102,7 +99,7 @@ test "plist generation without icon" {
     var buffer: std.ArrayList(u8) = .empty;
     defer buffer.deinit(allocator);
 
-    try generate(allocator, buffer.writer(allocator), config);
+    try generate(buffer.writer(allocator), config);
 
     const output = try buffer.toOwnedSlice(allocator);
     defer allocator.free(output);
@@ -132,7 +129,7 @@ test "plist generation with icon" {
     var buffer: std.ArrayList(u8) = .empty;
     defer buffer.deinit(allocator);
 
-    try generate(allocator, buffer.writer(allocator), config);
+    try generate(buffer.writer(allocator), config);
 
     const output = try buffer.toOwnedSlice(allocator);
     defer allocator.free(output);
@@ -155,7 +152,7 @@ test "plist generation with special characters in name" {
     var buffer: std.ArrayList(u8) = .empty;
     defer buffer.deinit(allocator);
 
-    try generate(allocator, buffer.writer(allocator), config);
+    try generate(buffer.writer(allocator), config);
 
     const output = try buffer.toOwnedSlice(allocator);
     defer allocator.free(output);

@@ -33,22 +33,16 @@ pub fn process(allocator: Allocator, icon_path: []const u8, resources_dir: []con
 
 /// Copy an existing .icns file directly to the Resources directory.
 fn copyIconsFile(icon_path: []const u8, resources_dir: []const u8) !void {
-    const dest_path = try fs.path.join(
-        std.heap.page_allocator, // Use page allocator for temp path
-        &.{ resources_dir, "AppIcon.icns" },
-    );
-    defer std.heap.page_allocator.free(dest_path);
+    var dest_path_buf: [fs.max_path_bytes]u8 = undefined;
+    const dest_path = try std.fmt.bufPrint(&dest_path_buf, "{s}/AppIcon.icns", .{resources_dir});
 
     try fs.cwd().copyFile(icon_path, fs.cwd(), dest_path, .{});
 }
 
 /// Convert a .png file to .icns using the system sips utility.
 fn convertPngToIconS(allocator: Allocator, icon_path: []const u8, resources_dir: []const u8) !void {
-    const dest_path = try fs.path.join(
-        std.heap.page_allocator, // Use page allocator for temp path
-        &.{ resources_dir, "AppIcon.icns" },
-    );
-    defer std.heap.page_allocator.free(dest_path);
+    var dest_path_buf: [fs.max_path_bytes]u8 = undefined;
+    const dest_path = try std.fmt.bufPrint(&dest_path_buf, "{s}/AppIcon.icns", .{resources_dir});
 
     // Build sips command: sips -s format icns <input> --out <output>
     const argv = [_][]const u8{
