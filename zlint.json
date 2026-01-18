@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/DonIsaac/zlint/refs/tags/v0.7.9/zlint.schema.json",
+  "rules": {
+    "allocator-first-param": "allow",
+    "avoid-as": "error",
+    "case-convention": "allow",
+    "empty-file": "error",
+    "homeless-try": "error",
+    "line-length": ["error", { "max_length": 120 }],
+    "must-return-ref": "error",
+    "no-catch-return": "error",
+    "no-return-try": "error",
+    "no-unresolved": "error",
+    "returned-stack-reference": "error",
+    "suppressed-errors": "allow",
+    "unsafe-undefined": "allow",
+    "unused-decls": "error",
+    "useless-error-return": "error"
+  }
+}

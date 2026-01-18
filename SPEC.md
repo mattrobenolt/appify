@@ -4,22 +4,24 @@
 
 `appify` is a command-line tool written in Zig that generates standalone macOS `.app` bundles from terminal commands. The primary use case is wrapping TUI applications (like `lazygit`, `btop`, `nvim`) so they appear as distinct applications in Cmd+Tab, Spotlight, and the Dock.
 
-The generated apps are simple shell script launchers that invoke Ghostty (or another terminal emulator) with the specified command. No compilation happens at generation time—the output is just a properly structured folder with a shell script and metadata.
+The generated apps are **native Swift macOS applications** that embed the **GhosttyKit** terminal emulator library.
+
+**Key concept:** The native app is pre-compiled as a "template" and embedded into the `appify` CLI binary. When the user runs `appify`, this template is unpacked and configured via a JSON file and Info.plist updates. No compilation happens at generation time.
 
 ## Goals
 
-- Single static binary with no runtime dependencies
-- Fast execution (should feel instant)
-- Simple, ergonomic CLI
-- Generated apps should work on any modern macOS (11+) without additional dependencies
-- Clean, idiomatic Zig code
+- Single static binary with no runtime dependencies for the CLI.
+- Fast execution (instant generation).
+- Simple, ergonomic CLI.
+- Generated apps are native, high-performance terminal windows.
+- Clean, idiomatic Zig code for the CLI.
 
 ## Non-Goals
 
-- GUI interface
-- Supporting terminal emulators other than Ghostty (initially—can be added later)
-- Icon editing/creation (just embedding existing icons)
-- Code signing (user can do this separately with `codesign`)
+- GUI interface for the CLI.
+- Supporting terminal emulators other than Ghostty (the app *is* a Ghostty instance).
+- Icon editing/creation (just embedding existing icons).
+- Code signing (user can do this separately with `codesign`).
 
 ---
 
@@ -48,11 +50,11 @@ Examples:
 
 ### Behavior Notes
 
-- If `<command>` is not an absolute path, it should be preserved as-is (user's PATH will resolve it at runtime)
-- `--name` should allow spaces and be properly escaped in generated files
-- If `--icon` is a `.png` file, convert it to `.icns` using `sips` (available on all Macs)
-- Output creates `<name>.app` in the specified output directory
-- Overwrite existing `.app` bundle if present (no confirmation prompt—keep it simple)
+- If `<command>` is not an absolute path, it should be preserved as-is (user's PATH will resolve it at runtime).
+- `--name` should allow spaces and be properly escaped in generated files.
+- If `--icon` is a `.png` file, convert it to `.icns` using `sips` (available on all Macs).
+- Output creates `<name>.app` in the specified output directory.
+- Overwrite existing `.app` bundle if present (no confirmation prompt—keep it simple).
 
 ---
 
@@ -65,76 +67,41 @@ LazyGit.app/
   Contents/
     Info.plist
     MacOS/
-      LazyGit           # Shell script (executable)
+      appify            # Native Swift Executable (renamed from template if needed, or kept as appify)
     Resources/
       AppIcon.icns      # Only present if --icon provided
+      appify.json       # Runtime configuration
+      appify.ghostty    # Optional Ghostty config override
 ```
 
 ### Info.plist
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>LazyGit</string>
-    
-    <key>CFBundleIdentifier</key>
-    <string>com.matt.lazygit</string>
-    
-    <key>CFBundleName</key>
-    <string>LazyGit</string>
-    
-    <key>CFBundleDisplayName</key>
-    <string>LazyGit</string>
-    
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    
-    <key>CFBundleVersion</key>
-    <string>1.0</string>
-    
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-    
-    <key>LSUIElement</key>
-    <false/>
-    
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
+Standard macOS `Info.plist` with:
+- `CFBundleIdentifier`: `com.matt.lazygit`
+- `CFBundleName`: `LazyGit`
+- `CFBundleDisplayName`: `LazyGit`
+- `LSUIElement`: `false` (Dock app)
+
+### Runtime Config (`appify.json`)
+
+Located in `Contents/Resources/appify.json`.
+
+```json
+{
+  "command": "lazygit",
+  "title": "LazyGit",
+  "cwd": null,
+  "env": {}
+}
 ```
 
-Notes:
-- Omit `CFBundleIconFile` if no icon provided
-- `CFBundleExecutable` must match the script filename in `MacOS/`
-- `LSUIElement` is `false` so the app appears in Dock while running
+The Swift app reads this on launch to configure the terminal surface.
 
-### Launcher Script
+### Ghostty Config Override (`appify.ghostty`)
 
-`Contents/MacOS/<AppName>`:
-
-```bash
-#!/bin/bash
-open -nW -a Ghostty --args \
-    --command='<command>' \
-    --quit-after-last-window-closed=true \
-    --window-save-state=never
-```
-
-Notes:
-- Must be executable (`chmod +x`)
-- Use single quotes around command to handle arguments/spaces properly
-- The script name must match `CFBundleExecutable` in Info.plist
-- Filename should be the app name (matching the `.app` bundle name, without extension)
+If `--ghostty-config` is provided, the file is copied into
+`Contents/Resources/appify.ghostty` and loaded after the user's default
+Ghostty config files.
 
 ---
 
@@ -161,22 +128,28 @@ Run the `sips` conversion by spawning a child process from Zig.
 appify/
   src/
     main.zig          # Entry point, CLI parsing
-    bundle.zig        # App bundle generation logic
+    bundle.zig        # App bundle generation logic (unpacks template)
     plist.zig         # Info.plist XML generation
     icon.zig          # Icon handling/conversion
-  build.zig
+  macos/              # Native Swift App Source
+    appify/           # Xcode project and source files
+  build.zig           # Zig build script (builds GhosttyKit -> Swift App -> CLI)
   README.md
   LICENSE
-  .github/
-    workflows/
-      ci.yml          # Build + test on push/PR
-      release.yml     # Build release binaries on tag
 ```
+
+### Build Process
+
+1. **GhosttyKit**: Built from `ghostty` dependency (Swift/Zig).
+2. **Swift App**: Built using `xcodebuild`, linking `GhosttyKit.xcframework`.
+3. **Template**: The resulting `.app` is tarred.
+4. **CLI**: The tarball is embedded into `src/main.zig` via `@embedFile`.
 
 ### Dependencies
 
-- No external Zig dependencies (use std lib only)
-- System dependency on `sips` for PNG conversion (present on all macOS)
+- **Build Time**: Zig, Xcode (for `xcodebuild`), macOS SDK.
+- **Run Time (CLI)**: None (static binary).
+- **Run Time (Generated App)**: macOS 11+.
 
 ### Error Handling
 
@@ -187,90 +160,15 @@ Exit with non-zero status and print to stderr for:
 - Failed to create directory structure
 - Failed to convert PNG to ICNS (sips failed)
 
-Keep error messages concise and actionable:
-```
-error: icon file not found: ./missing.png
-error: output directory does not exist: /bad/path
-error: failed to convert PNG to ICNS (sips exited with code 1)
-```
-
 ### CLI Parsing
 
-Use Zig's `std.process.args()` and manual parsing—keep it simple. No need for a CLI parsing library for this few options.
-
----
-
-## CI/CD
-
-### `.github/workflows/ci.yml`
-
-Trigger: push to `main`, all pull requests
-
-Jobs:
-1. **Build**: Build on macOS (macos-latest)
-2. **Test**: Run `zig build test`
-3. **Lint**: Run `zig fmt --check src/`
-
-### `.github/workflows/release.yml`
-
-Trigger: push of version tags (`v*`)
-
-Jobs:
-1. Build release binary on macOS (both ARM and Intel if possible via cross-compile, or use matrix)
-2. Create GitHub Release
-3. Upload binary as release asset
-
-Release binary naming: `appify-darwin-arm64`, `appify-darwin-x86_64`
-
-Optionally create a universal binary by building both and using `lipo`:
-```bash
-lipo -create -output appify appify-arm64 appify-x86_64
-```
-
----
-
-## Testing
-
-### Unit Tests
-
-In each module, test:
-- `plist.zig`: XML generation produces valid plist structure
-- `bundle.zig`: correct file paths generated for given inputs
-- CLI argument parsing: defaults, overrides, edge cases
-
-### Integration Test
-
-A build step or shell script that:
-1. Runs `appify /bin/echo --name "TestApp" --output /tmp`
-2. Verifies `/tmp/TestApp.app` structure exists
-3. Verifies `Info.plist` contains expected values
-4. Verifies launcher script is executable and contains expected content
-5. Cleans up
-
----
-
-## README.md
-
-Should include:
-- One-liner description
-- Installation (download binary, or `zig build`)
-- Usage examples
-- How generated apps work (briefly explain the Ghostty invocation)
-- Note that Ghostty must be installed for generated apps to work
-- License
+Use Zig's `std.process.args()` and manual parsing—keep it simple.
 
 ---
 
 ## Future Enhancements (Out of Scope for v1)
 
-- `--terminal` flag to support other terminal emulators (Kitty, WezTerm, etc.)
 - `--args` to pass additional arguments to the command
 - `--working-dir` to set initial directory
 - Read config from a file for batch generation
 - Homebrew formula
-
----
-
-## License
-
-MIT

@@ -4,10 +4,10 @@ Generate macOS `.app` bundles from terminal commands. Wrap TUI applications (lik
 
 ## Features
 
-- Fast, single static binary with no runtime dependencies
-- Generates `.app` bundles that launch commands in Ghostty terminal
-- Support for custom icons (.icns or .png with automatic conversion)
-- Clean, idiomatic Zig codebase
+- **Fast & Self-Contained**: Single static CLI binary with no runtime dependencies.
+- **Native Experience**: Generates real macOS applications (Swift + GhosttyKit), not shell scripts.
+- **High Performance**: Uses the embedded Ghostty terminal engine for GPU-accelerated rendering.
+- **Customizable**: Support for custom names, bundle IDs, and icons (.icns or .png).
 
 ## Installation
 
@@ -59,50 +59,41 @@ appify nvim --name "Neovim" --bundle-id "com.matt.neovim" --output ~/Application
 
 ## How It Works
 
-Generated apps directly execute Ghostty with the specified command:
+`appify` embeds a compiled native Swift macOS application template that uses the [GhosttyKit](https://github.com/ghostty-org/ghostty) terminal library.
 
-```sh
-#!/bin/sh
-# Activate this app to bring window to front
-osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
-exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
-    --title='<app-name>' \
-    --command='<your-command>' \
-    --quit-after-last-window-closed=true \
-    --window-save-state=never \
-    --confirm-close-surface=false \
-    --keybind=super+t=unbind \
-    --keybind=super+d=unbind \
-    --keybind=super+shift+d=unbind
+When you run `appify`:
+1. It unpacks this template into a new `.app` bundle.
+2. It configures the app by writing a `Contents/Resources/appify.json` file:
+   ```json
+   {
+     "command": "lazygit",
+     "title": "LazyGit"
+   }
+   ```
+3. It updates `Info.plist` with your app name and bundle ID.
+4. It processes and installs your icon.
+
+The resulting app is a standalone macOS application that launches a dedicated terminal window running your command.
+
+## Ghostty Config Overrides
+
+You can bundle a Ghostty config file that layers on top of the user's system config:
+
+```bash
+appify btop --ghostty-config ./btop.ghostty
 ```
 
-The `.app` bundle includes:
-- `Contents/Info.plist` - macOS application metadata with your custom app name
-- `Contents/MacOS/<AppName>` - Executable launcher script
-- `Contents/Resources/AppIcon.icns` - Optional icon (if provided)
-
-**Key behavior:**
-- Uses AppleScript to activate the app window, bringing it to the front
-- Uses `exec` to replace the launcher process with Ghostty directly
-- The app appears in Dock and Cmd+Tab with **your chosen name** (e.g., "LazyGit", not "Ghostty")
-- Each wrapped app is a distinct entry in Cmd+Tab
-- Custom icons (if provided) are displayed in Dock and Cmd+Tab
-- Disables tab and split creation keybinds for a cleaner single-window experience:
-  - Cmd+T (new tab) disabled
-  - Cmd+D (split right) disabled
-  - Cmd+Shift+D (split down) disabled
-
-**Note:** The macOS menu bar will still display "Ghostty" as this is controlled by Ghostty's internal code, not the wrapper.
+This file is copied into the app at `Contents/Resources/appify.ghostty` and loaded after the default config files.
 
 ## Requirements
 
 **For generated apps:**
 - macOS 11.0 or later
-- [Ghostty](https://ghostty.org/) terminal emulator installed
 
-**For building appify:**
+**For building appify (development):**
 - Zig 0.15.2 or later
-- macOS (for `sips` utility, used for PNG to ICNS conversion)
+- Xcode (for building the Swift template)
+- macOS (for `sips` utility)
 
 ## Development
 
@@ -111,9 +102,6 @@ The `.app` bundle includes:
 ```bash
 # Unit tests
 zig build test
-
-# Integration tests
-./test-integration.sh
 ```
 
 ### Code formatting
@@ -126,13 +114,9 @@ zig fmt src/
 
 ```
 appify/
-  src/
-    main.zig      # CLI parsing and entry point
-    bundle.zig    # App bundle generation
-    plist.zig     # Info.plist XML generation
-    icon.zig      # Icon handling and conversion
-  build.zig       # Build configuration
-  test-integration.sh  # Integration tests
+  src/            # Zig CLI source
+  macos/          # Swift App Template source
+  build.zig       # Build configuration (Builds GhosttyKit -> Swift App -> CLI)
 ```
 
 ## License

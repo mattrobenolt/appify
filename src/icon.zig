@@ -4,6 +4,7 @@
 const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
+const testing = std.testing;
 const Allocator = mem.Allocator;
 
 pub const IconError = error{
@@ -62,11 +63,7 @@ fn convertPngToIconS(allocator: Allocator, icon_path: []const u8, resources_dir:
     const term = try child.spawnAndWait();
 
     switch (term) {
-        .Exited => |code| {
-            if (code != 0) {
-                return IconError.ConversionFailed;
-            }
-        },
+        .Exited => |code| if (code != 0) return IconError.ConversionFailed,
         else => return IconError.ConversionFailed,
     }
 }
@@ -75,16 +72,16 @@ fn convertPngToIconS(allocator: Allocator, icon_path: []const u8, resources_dir:
 
 test "extension detection - icns" {
     const path = "/path/to/icon.icns";
-    try std.testing.expect(mem.endsWith(u8, path, ".icns"));
+    try testing.expect(mem.endsWith(u8, path, ".icns"));
 }
 
 test "extension detection - png" {
     const path = "/path/to/icon.png";
-    try std.testing.expect(mem.endsWith(u8, path, ".png"));
+    try testing.expect(mem.endsWith(u8, path, ".png"));
 }
 
 test "extension detection - unsupported" {
     const path = "/path/to/icon.jpg";
-    try std.testing.expect(!mem.endsWith(u8, path, ".icns"));
-    try std.testing.expect(!mem.endsWith(u8, path, ".png"));
+    try testing.expect(!mem.endsWith(u8, path, ".icns"));
+    try testing.expect(!mem.endsWith(u8, path, ".png"));
 }

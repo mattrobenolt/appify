@@ -6,6 +6,8 @@ const fs = std.fs;
 const mem = std.mem;
 const process = std.process;
 const Allocator = mem.Allocator;
+const heap = std.heap;
+const testing = std.testing;
 const builtin = @import("builtin");
 
 const bundle = @import("bundle.zig");
@@ -25,6 +27,7 @@ const help_text =
     \\  -o, --output <path>         Output directory (default: current directory)
     \\  -i, --icon <path>           Path to icon file (.icns or .png)
     \\  -b, --bundle-id <id>        Bundle identifier (default: com.appify.<name-lowercase>)
+    \\  --ghostty-config <path>     Ghostty config override file (optional)
     \\
     \\  -h, --help                  Show this help message
     \\  -v, --version               Show version
@@ -36,74 +39,79 @@ const help_text =
     \\
 ;
 
+var stdout_buffer: [1024]u8 = undefined;
+var stdout_writer = fs.File.stdout().writer(&stdout_buffer);
+const stdout = &stdout_writer.interface;
+
+var debug_allocator: heap.DebugAllocator(.{}) = .init;
+
 const ParsedArgs = struct {
     command: ?[]const u8 = null,
     name: ?[]const u8 = null,
     output_dir: ?[]const u8 = null,
     icon_path: ?[]const u8 = null,
     bundle_id: ?[]const u8 = null,
+    ghostty_config_path: ?[]const u8 = null,
     show_help: bool = false,
     show_version: bool = false,
 };
-
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
     // Set up allocator
     const gpa, const is_debug = gpa: {
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
+            .ReleaseFast, .ReleaseSmall => .{ heap.smp_allocator, false },
         };
     };
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };
+    defer stdout.flush() catch {};
 
     // Use arena for temporary CLI parsing allocations
-    var arena: std.heap.ArenaAllocator = .init(gpa);
+    var arena: heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
-    const arena_allocator = arena.allocator();
+    const allocator = arena.allocator();
 
     // Parse arguments
-    const args = try parseArgs(arena_allocator);
+    const args = try parseArgs();
 
     // Handle help and version flags
     if (args.show_help) {
-        try fs.File.stdout().writeAll(help_text);
+        try stdout.writeAll(help_text);
         return;
     }
 
     if (args.show_version) {
-        const stdout = fs.File.stdout();
-        try stdout.writeAll("appify version ");
-        try stdout.writeAll(version);
-        try stdout.writeAll("\n");
+        try stdout.print("appify version {s}\n", .{version});
         return;
     }
 
     // Validate command is provided
     const command = args.command orelse {
-        try printError("missing required argument: <command>", .{});
-        process.exit(1);
+        die("missing required argument: <command>", .{});
     };
 
     // Derive defaults
     const name = args.name orelse deriveAppName(command);
     const output_dir = args.output_dir orelse ".";
-    const bundle_id = args.bundle_id orelse try deriveBundleId(arena_allocator, name);
+    const bundle_id = args.bundle_id orelse try deriveBundleId(allocator, name);
 
     // Validate output directory exists
     fs.cwd().access(output_dir, .{}) catch {
-        try printError("output directory does not exist: {s}", .{output_dir});
-        process.exit(1);
+        die("output directory does not exist: {s}", .{output_dir});
     };
 
     // Validate icon file exists if provided
     if (args.icon_path) |icon_path| {
         fs.cwd().access(icon_path, .{}) catch {
-            try printError("icon file not found: {s}", .{icon_path});
-            process.exit(1);
+            die("icon file not found: {s}", .{icon_path});
+        };
+    }
+    if (args.ghostty_config_path) |ghostty_config_path| {
+        fs.cwd().access(ghostty_config_path, .{}) catch {
+            die("ghostty config file not found: {s}", .{ghostty_config_path});
         };
     }
 
@@ -114,37 +122,26 @@ pub fn main() !void {
         .output_dir = output_dir,
         .bundle_id = bundle_id,
         .icon_path = args.icon_path,
+        .ghostty_config_path = args.ghostty_config_path,
     };
 
     // Generate the app bundle
-    bundle.generate(gpa, config) catch |err| {
+    bundle.generate(allocator, config) catch |err| {
         switch (err) {
-            error.FileNotFound => {
-                try printError("file not found during bundle generation", .{});
-            },
-            error.AccessDenied => {
-                try printError("permission denied", .{});
-            },
-            else => {
-                try printError("failed to generate app bundle: {s}", .{@errorName(err)});
-            },
+            error.FileNotFound => die("file not found during bundle generation", .{}),
+            error.AccessDenied => die("permission denied", .{}),
+            else => die("failed to generate app bundle: {s}", .{@errorName(err)}),
         }
-        process.exit(1);
     };
 
     // Success - print confirmation
-    const stdout = fs.File.stdout();
-    try stdout.writeAll("Created ");
-    try stdout.writeAll(name);
-    try stdout.writeAll(".app in ");
-    try stdout.writeAll(output_dir);
-    try stdout.writeAll("\n");
+    try stdout.print("Created {s}.app in {s}\n", .{ name, output_dir });
 }
 
 /// Parse command line arguments into ParsedArgs struct.
-fn parseArgs(allocator: Allocator) !ParsedArgs {
+fn parseArgs() !ParsedArgs {
     var result: ParsedArgs = .{};
-    var args = try process.argsWithAllocator(allocator);
+    var args = process.args();
     defer args.deinit();
 
     _ = args.skip(); // Skip program name
@@ -155,35 +152,23 @@ fn parseArgs(allocator: Allocator) !ParsedArgs {
         } else if (mem.eql(u8, arg, "-v") or mem.eql(u8, arg, "--version")) {
             result.show_version = true;
         } else if (mem.eql(u8, arg, "-n") or mem.eql(u8, arg, "--name")) {
-            result.name = args.next() orelse {
-                try printError("missing value for {s}", .{arg});
-                process.exit(1);
-            };
+            result.name = args.next() orelse die("missing value for {s}", .{arg});
         } else if (mem.eql(u8, arg, "-o") or mem.eql(u8, arg, "--output")) {
-            result.output_dir = args.next() orelse {
-                try printError("missing value for {s}", .{arg});
-                process.exit(1);
-            };
+            result.output_dir = args.next() orelse die("missing value for {s}", .{arg});
         } else if (mem.eql(u8, arg, "-i") or mem.eql(u8, arg, "--icon")) {
-            result.icon_path = args.next() orelse {
-                try printError("missing value for {s}", .{arg});
-                process.exit(1);
-            };
+            result.icon_path = args.next() orelse die("missing value for {s}", .{arg});
         } else if (mem.eql(u8, arg, "-b") or mem.eql(u8, arg, "--bundle-id")) {
-            result.bundle_id = args.next() orelse {
-                try printError("missing value for {s}", .{arg});
-                process.exit(1);
-            };
+            result.bundle_id = args.next() orelse die("missing value for {s}", .{arg});
+        } else if (mem.eql(u8, arg, "--ghostty-config")) {
+            result.ghostty_config_path = args.next() orelse die("missing value for {s}", .{arg});
         } else if (mem.startsWith(u8, arg, "-")) {
-            try printError("unknown option: {s}", .{arg});
-            process.exit(1);
+            die("unknown option: {s}", .{arg});
         } else {
             // First non-flag argument is the command
             if (result.command == null) {
                 result.command = arg;
             } else {
-                try printError("unexpected argument: {s}", .{arg});
-                process.exit(1);
+                die("unexpected argument: {s}", .{arg});
             }
         }
     }
@@ -195,72 +180,60 @@ fn parseArgs(allocator: Allocator) !ParsedArgs {
 fn deriveAppName(command: []const u8) []const u8 {
     const basename = fs.path.basename(command);
 
-    // Capitalize first letter if possible
-    if (basename.len > 0) {
-        // For now, just return basename as-is
-        // Could add capitalization logic if desired
-        return basename;
-    }
-
-    return "App";
+    return if (basename.len > 0) basename else "App";
 }
 
 /// Derive bundle identifier from app name.
 fn deriveBundleId(allocator: Allocator, name: []const u8) ![]const u8 {
     // Convert name to lowercase for bundle ID
-    const lowercase_name = try allocator.alloc(u8, name.len);
-    defer allocator.free(lowercase_name);
+    const result = try allocator.alloc(u8, name.len);
+    defer allocator.free(result);
 
     for (name, 0..) |c, i| {
-        lowercase_name[i] = std.ascii.toLower(c);
+        result[i] = switch (c) {
+            ' ' => '-',
+            else => std.ascii.toLower(c),
+        };
     }
 
-    // Replace spaces with hyphens
-    for (lowercase_name) |*c| {
-        if (c.* == ' ') {
-            c.* = '-';
-        }
-    }
-
-    return std.fmt.allocPrint(allocator, "com.appify.{s}", .{lowercase_name});
+    return std.fmt.allocPrint(allocator, "com.appify.{s}", .{result});
 }
 
 /// Print error message to stderr.
-fn printError(comptime fmt: []const u8, args: anytype) !void {
-    const stderr = fs.File.stderr();
-    try stderr.writeAll("error: ");
+fn die(comptime fmt: []const u8, args: anytype) noreturn {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_writer = fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
 
-    // Format the error message
-    var buffer: [1024]u8 = undefined;
-    const msg = try std.fmt.bufPrint(&buffer, fmt, args);
-    try stderr.writeAll(msg);
-    try stderr.writeAll("\n");
+    stderr.print("error: " ++ fmt ++ "\n", args) catch {};
+    stderr.flush() catch {};
+    std.process.exit(1);
 }
 
 // Tests
 
 test "deriveAppName from simple command" {
     const name = deriveAppName("lazygit");
-    try std.testing.expectEqualStrings("lazygit", name);
+    try testing.expectEqualStrings("lazygit", name);
 }
 
 test "deriveAppName from full path" {
     const name = deriveAppName("/opt/homebrew/bin/btop");
-    try std.testing.expectEqualStrings("btop", name);
+    try testing.expectEqualStrings("btop", name);
 }
 
 test "deriveBundleId from simple name" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
     const bundle_id = try deriveBundleId(allocator, "LazyGit");
     defer allocator.free(bundle_id);
 
-    try std.testing.expectEqualStrings("com.appify.lazygit", bundle_id);
+    try testing.expectEqualStrings("com.appify.lazygit", bundle_id);
 }
 
 test "deriveBundleId with spaces" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
     const bundle_id = try deriveBundleId(allocator, "My App");
     defer allocator.free(bundle_id);
 
-    try std.testing.expectEqualStrings("com.appify.my-app", bundle_id);
+    try testing.expectEqualStrings("com.appify.my-app", bundle_id);
 }

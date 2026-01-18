@@ -2,6 +2,9 @@
 //! Generates properly formatted XML plists with standard app metadata.
 
 const std = @import("std");
+const Io = std.Io;
+const testing = std.testing;
+const mem = std.mem;
 
 pub const PlistConfig = struct {
     executable_name: []const u8,
@@ -12,7 +15,7 @@ pub const PlistConfig = struct {
 
 /// Generate an Info.plist file with the provided configuration.
 /// The writer parameter accepts any writer type (file, buffer, etc).
-pub fn generate(writer: *std.Io.Writer, config: PlistConfig) !void {
+pub fn generate(writer: *Io.Writer, config: PlistConfig) !void {
     // Write XML declaration and DOCTYPE
     try writer.writeAll(
         \\<?xml version="1.0" encoding="UTF-8"?>
@@ -87,7 +90,7 @@ pub fn generate(writer: *std.Io.Writer, config: PlistConfig) !void {
 // Tests
 
 test "plist generation without icon" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     const config: PlistConfig = .{
         .executable_name = "TestApp",
@@ -105,19 +108,19 @@ test "plist generation without icon" {
     defer allocator.free(output);
 
     // Verify essential keys are present
-    try std.testing.expect(std.mem.indexOf(u8, output, "CFBundleExecutable") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "TestApp") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "CFBundleIdentifier") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "com.test.testapp") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "LSUIElement") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "<false/>") != null);
+    try testing.expect(mem.indexOf(u8, output, "CFBundleExecutable") != null);
+    try testing.expect(mem.indexOf(u8, output, "TestApp") != null);
+    try testing.expect(mem.indexOf(u8, output, "CFBundleIdentifier") != null);
+    try testing.expect(mem.indexOf(u8, output, "com.test.testapp") != null);
+    try testing.expect(mem.indexOf(u8, output, "LSUIElement") != null);
+    try testing.expect(mem.indexOf(u8, output, "<false/>") != null);
 
     // Verify icon key is NOT present
-    try std.testing.expect(std.mem.indexOf(u8, output, "CFBundleIconFile") == null);
+    try testing.expect(mem.indexOf(u8, output, "CFBundleIconFile") == null);
 }
 
 test "plist generation with icon" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     const config: PlistConfig = .{
         .executable_name = "IconApp",
@@ -135,12 +138,12 @@ test "plist generation with icon" {
     defer allocator.free(output);
 
     // Verify icon key IS present
-    try std.testing.expect(std.mem.indexOf(u8, output, "CFBundleIconFile") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "AppIcon") != null);
+    try testing.expect(mem.indexOf(u8, output, "CFBundleIconFile") != null);
+    try testing.expect(mem.indexOf(u8, output, "AppIcon") != null);
 }
 
 test "plist generation with special characters in name" {
-    const allocator = std.testing.allocator;
+    const allocator = testing.allocator;
 
     const config: PlistConfig = .{
         .executable_name = "My App",
@@ -158,5 +161,5 @@ test "plist generation with special characters in name" {
     defer allocator.free(output);
 
     // Verify spaces are preserved in names
-    try std.testing.expect(std.mem.indexOf(u8, output, "My App") != null);
+    try testing.expect(mem.indexOf(u8, output, "My App") != null);
 }

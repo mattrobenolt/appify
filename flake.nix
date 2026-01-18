@@ -1,6 +1,4 @@
 {
-  description = "Zig development environment";
-
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
@@ -11,10 +9,11 @@
   };
 
   outputs =
-    { nixpkgs
-    , flake-utils
-    , mattware
-    , ...
+    {
+      nixpkgs,
+      flake-utils,
+      mattware,
+      ...
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -25,17 +24,19 @@
         };
       in
       {
-        devShells.default = pkgs.mkShell {
+        devShells.default = pkgs.mkShellNoCC {
           packages = with pkgs; [
             zig_0_15
             zls_0_15
             zlint
             zigdoc
+            gnutar
           ];
 
           shellHook = ''
             unset NIX_CFLAGS_COMPILE
             unset ZIG_GLOBAL_CACHE_DIR
+            export PATH="/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin:$PATH"
           '';
         };
       }

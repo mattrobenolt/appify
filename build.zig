@@ -12,6 +12,7 @@ pub fn build(b: *std.Build) void {
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
+    if (target.result.os.tag != .macos) @panic("appify macOS build only supports macOS targets.");
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
@@ -20,6 +21,12 @@ pub fn build(b: *std.Build) void {
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
     // in this directory.
+
+    const ghostty_xcframework_target = b.option(
+        enum { native, universal },
+        "ghostty-xcframework-target",
+        "Ghostty xcframework target (native or universal).",
+    ) orelse .native;
 
     const exe = b.addExecutable(.{
         .name = "appify",
@@ -74,6 +81,78 @@ pub fn build(b: *std.Build) void {
     // A top level step for running all tests.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+
+    const ghostty_dep = b.dependency("ghostty", .{});
+    const ghostty_target_arg = switch (ghostty_xcframework_target) {
+        .native => "native",
+        .universal => "universal",
+    };
+
+    const ghostty_cmd = b.addSystemCommand(&.{
+        "zig",
+        "build",
+        "-Dapp-runtime=none",
+        "-Demit-xcframework=true",
+        "-Di18n=false",
+        b.fmt("-Doptimize={s}", .{@tagName(optimize)}),
+        b.fmt("-Dxcframework-target={s}", .{ghostty_target_arg}),
+    });
+    ghostty_cmd.setCwd(ghostty_dep.path("."));
+
+    const ghostty_install = b.addInstallDirectory(.{
+        .source_dir = ghostty_dep.path("macos/GhosttyKit.xcframework"),
+        .install_dir = .prefix,
+        .install_subdir = "GhosttyKit.xcframework",
+    });
+    ghostty_install.step.dependOn(&ghostty_cmd.step);
+
+    const ghostty_step = b.step(
+        "ghostty-lib",
+        "Build GhosttyKit.xcframework.",
+    );
+    ghostty_step.dependOn(&ghostty_install.step);
+
+    const macos_step = b.step(
+        "macos",
+        "Build GhosttyKit.xcframework and appify.app",
+    );
+    const xcodebuild_config: []const u8 = if (optimize == .Debug) "Debug" else "Release";
+    const xcodebuild_cmd = b.addSystemCommand(&.{
+        "xcodebuild",
+        "-scheme",
+        "appify",
+        "-configuration",
+        xcodebuild_config,
+        b.fmt("CONFIGURATION_BUILD_DIR={s}", .{b.getInstallPath(.prefix, "")}),
+    });
+    xcodebuild_cmd.setCwd(b.path("macos/appify"));
+    xcodebuild_cmd.step.dependOn(&ghostty_install.step);
+    macos_step.dependOn(&xcodebuild_cmd.step);
+
+    const template_cmd = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\tar -cf "$1" -C "$2" . &&
+        \\cat > "$3" <<'EOF'
+        \\pub const data = @embedFile("appify-template.tar");
+        \\EOF
+        ,
+        "--",
+    });
+    _ = template_cmd.addOutputFileArg("appify-template.tar");
+    const appify_app_path = b.getInstallPath(.prefix, "appify.app");
+    template_cmd.addDirectoryArg(.{ .cwd_relative = appify_app_path });
+    template_cmd.addFileInput(.{
+        .cwd_relative = b.getInstallPath(.prefix, "appify.app/Contents/MacOS/appify"),
+    });
+    const template_zig = template_cmd.addOutputFileArg("appify_template.zig");
+    template_cmd.step.dependOn(&xcodebuild_cmd.step);
+    exe.step.dependOn(&template_cmd.step);
+
+    const template_module = b.addModule("template_tar", .{
+        .root_source_file = template_zig,
+    });
+    exe.root_module.addImport("template_tar", template_module);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

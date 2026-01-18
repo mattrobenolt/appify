@@ -4,7 +4,14 @@
 const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
+const tar = std.tar;
+const posix = std.posix;
 const Allocator = mem.Allocator;
+const json = std.json;
+const Io = std.Io;
+const testing = std.testing;
+
+const embedded_template_tar = @import("template_tar").data;
 
 const icon = @import("icon.zig");
 const plist = @import("plist.zig");
@@ -15,6 +22,7 @@ pub const Config = struct {
     output_dir: []const u8,
     bundle_id: []const u8,
     icon_path: ?[]const u8,
+    ghostty_config_path: ?[]const u8 = null,
 };
 
 /// Generate a complete .app bundle from the provided configuration.
@@ -37,8 +45,7 @@ pub fn generate(allocator: Allocator, config: Config) !void {
         }
     };
 
-    // Create directory structure
-    try createDirectoryStructure(allocator, app_path);
+    try extractEmbeddedTemplate(app_path);
 
     // Construct paths for subdirectories
     const contents_path = try fs.path.join(allocator, &.{ app_path, "Contents" });
@@ -61,7 +68,7 @@ pub fn generate(allocator: Allocator, config: Config) !void {
     var plist_writer = plist_file.writer(&plist_buffer);
 
     const plist_config: plist.PlistConfig = .{
-        .executable_name = config.name,
+        .executable_name = "appify",
         .bundle_id = config.bundle_id,
         .display_name = config.name,
         .has_icon = config.icon_path != null,
@@ -77,146 +84,94 @@ pub fn generate(allocator: Allocator, config: Config) !void {
         try icon.process(allocator, icon_path, resources_path);
     }
 
-    // Write launcher script
-    const launcher_path = try fs.path.join(allocator, &.{ macos_path, config.name });
-    defer allocator.free(launcher_path);
+    if (config.ghostty_config_path) |ghostty_config_path| {
+        try copyGhosttyConfig(allocator, ghostty_config_path, resources_path);
+    }
 
-    try writeLauncherScript(allocator, launcher_path, config.command, config.name);
+    try writeAppifyConfig(allocator, resources_path, config);
+
+    const launcher_path = try fs.path.join(allocator, &.{ macos_path, "appify" });
+    defer allocator.free(launcher_path);
 
     // Make launcher executable
     try makeExecutable(launcher_path);
 }
 
-/// Create the standard .app directory structure.
-fn createDirectoryStructure(allocator: Allocator, app_path: []const u8) !void {
-    // Create top-level .app directory
-    try fs.cwd().makePath(app_path);
-
-    // Create Contents subdirectory
-    const contents_path = try fs.path.join(allocator, &.{ app_path, "Contents" });
-    defer allocator.free(contents_path);
-    try fs.cwd().makePath(contents_path);
-
-    // Create MacOS subdirectory
-    const macos_path = try fs.path.join(allocator, &.{ contents_path, "MacOS" });
-    defer allocator.free(macos_path);
-    try fs.cwd().makePath(macos_path);
-
-    // Create Resources subdirectory
-    const resources_path = try fs.path.join(allocator, &.{ contents_path, "Resources" });
-    defer allocator.free(resources_path);
-    try fs.cwd().makePath(resources_path);
-}
-
-/// Write the launcher shell script that directly executes Ghostty with the command.
-fn writeLauncherScript(allocator: Allocator, launcher_path: []const u8, command: []const u8, app_name: []const u8) !void {
-    const script = try std.fmt.allocPrint(
-        allocator,
-        \\#!/bin/sh
-        \\# Activate this app to bring window to front
-        \\osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
-        \\exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
-        \\    --title='{s}' \
-        \\    --command='{s}' \
-        \\    --quit-after-last-window-closed=true \
-        \\    --window-save-state=never \
-        \\    --confirm-close-surface=false \
-        \\    --keybind=super+t=unbind \
-        \\    --keybind=super+d=unbind \
-        \\    --keybind=super+shift+d=unbind
-        \\
-    ,
-        .{ app_name, command },
-    );
-    defer allocator.free(script);
-
-    const launcher_file = try fs.cwd().createFile(launcher_path, .{});
-    defer launcher_file.close();
-
-    try launcher_file.writeAll(script);
-}
-
 /// Make the launcher script executable using fchmodat.
 fn makeExecutable(path: []const u8) !void {
-    // Use std.posix.fchmodat to set executable permissions
+    // Use posix.fchmodat to set executable permissions
     // Mode 0o755 = rwxr-xr-x
-    try std.posix.fchmodat(std.posix.AT.FDCWD, path, 0o755, 0);
+    try posix.fchmodat(posix.AT.FDCWD, path, 0o755, 0);
+}
+
+fn copyGhosttyConfig(
+    allocator: Allocator,
+    ghostty_config_path: []const u8,
+    resources_path: []const u8,
+) !void {
+    const dest_path = try fs.path.join(allocator, &.{ resources_path, "appify.ghostty" });
+    defer allocator.free(dest_path);
+    try fs.cwd().copyFile(ghostty_config_path, fs.cwd(), dest_path, .{});
+}
+
+const AppifyRuntimeConfig = struct {
+    command: []const u8,
+    title: []const u8,
+    cwd: ?[]const u8 = null,
+};
+
+fn writeAppifyConfig(allocator: Allocator, resources_path: []const u8, config: Config) !void {
+    const config_path = try fs.path.join(allocator, &.{ resources_path, "appify.json" });
+    defer allocator.free(config_path);
+
+    const file = try fs.cwd().createFile(config_path, .{ .truncate = true });
+    defer file.close();
+
+    const runtime_config: AppifyRuntimeConfig = .{
+        .command = config.command,
+        .title = config.name,
+        .cwd = null,
+    };
+
+    var buffer: [4096]u8 = undefined;
+    var writer = file.writer(&buffer);
+    try writer.interface.print(
+        "{f}\n",
+        .{json.fmt(runtime_config, .{ .whitespace = .indent_2 })},
+    );
+    try writer.end();
+}
+
+fn extractEmbeddedTemplate(app_path: []const u8) !void {
+    try fs.cwd().makePath(app_path);
+    var dir = try fs.cwd().openDir(app_path, .{});
+    defer dir.close();
+
+    var reader: Io.Reader = .fixed(embedded_template_tar);
+    try tar.pipeToFileSystem(dir, &reader, .{});
 }
 
 // Tests
 
-test "launcher script generation" {
-    const allocator = std.testing.allocator;
+test "appify config json" {
+    const allocator = testing.allocator;
 
-    const script = try std.fmt.allocPrint(
-        allocator,
-        \\#!/bin/sh
-        \\# Activate this app to bring window to front
-        \\osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
-        \\exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
-        \\    --title='{s}' \
-        \\    --command='{s}' \
-        \\    --quit-after-last-window-closed=true \
-        \\    --window-save-state=never \
-        \\    --confirm-close-surface=false \
-        \\    --keybind=super+t=unbind \
-        \\    --keybind=super+d=unbind \
-        \\    --keybind=super+shift+d=unbind
-        \\
-    ,
-        .{ "LazyGit", "lazygit" },
+    var out: Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+
+    const runtime_config: AppifyRuntimeConfig = .{
+        .command = "lazygit",
+        .title = "LazyGit",
+        .cwd = null,
+    };
+
+    try out.writer.print(
+        "{f}",
+        .{json.fmt(runtime_config, .{ .whitespace = .indent_2 })},
     );
-    defer allocator.free(script);
 
-    // Verify shebang
-    try std.testing.expect(mem.startsWith(u8, script, "#!/bin/sh"));
+    const output = out.written();
 
-    // Verify activation command
-    try std.testing.expect(mem.indexOf(u8, script, "osascript") != null);
-
-    // Verify exec and Ghostty binary path
-    try std.testing.expect(mem.indexOf(u8, script, "exec /Applications/Ghostty.app/Contents/MacOS/ghostty") != null);
-
-    // Verify title is set
-    try std.testing.expect(mem.indexOf(u8, script, "--title='LazyGit'") != null);
-
-    // Verify command is present
-    try std.testing.expect(mem.indexOf(u8, script, "'lazygit'") != null);
-
-    // Verify Ghostty flags
-    try std.testing.expect(mem.indexOf(u8, script, "--quit-after-last-window-closed=true") != null);
-    try std.testing.expect(mem.indexOf(u8, script, "--window-save-state=never") != null);
-    try std.testing.expect(mem.indexOf(u8, script, "--confirm-close-surface=false") != null);
-
-    // Verify keybind unbindings for single-window mode
-    try std.testing.expect(mem.indexOf(u8, script, "--keybind=super+t=unbind") != null);
-    try std.testing.expect(mem.indexOf(u8, script, "--keybind=super+d=unbind") != null);
-    try std.testing.expect(mem.indexOf(u8, script, "--keybind=super+shift+d=unbind") != null);
-}
-
-test "launcher script with command containing spaces" {
-    const allocator = std.testing.allocator;
-
-    const script = try std.fmt.allocPrint(
-        allocator,
-        \\#!/bin/sh
-        \\# Activate this app to bring window to front
-        \\osascript -e 'tell application "System Events" to set frontmost of the first process whose unix id is '"$$"' to true' 2>/dev/null &
-        \\exec /Applications/Ghostty.app/Contents/MacOS/ghostty \
-        \\    --title='{s}' \
-        \\    --command='{s}' \
-        \\    --quit-after-last-window-closed=true \
-        \\    --window-save-state=never \
-        \\    --confirm-close-surface=false \
-        \\    --keybind=super+t=unbind \
-        \\    --keybind=super+d=unbind \
-        \\    --keybind=super+shift+d=unbind
-        \\
-    ,
-        .{ "My App", "/usr/local/bin/my app" },
-    );
-    defer allocator.free(script);
-
-    // Verify command with spaces is preserved
-    try std.testing.expect(mem.indexOf(u8, script, "'/usr/local/bin/my app'") != null);
+    try testing.expect(mem.indexOf(u8, output, "\"command\": \"lazygit\"") != null);
+    try testing.expect(mem.indexOf(u8, output, "\"title\": \"LazyGit\"") != null);
 }
