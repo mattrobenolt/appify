@@ -82,7 +82,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
 
-    const ghostty_dep = b.dependency("ghostty", .{});
+    const ghostty_dep = b.dependency("ghostty", .{
+        .@"version-string" = "0.0.0",
+    });
     const ghostty_target_arg = switch (ghostty_xcframework_target) {
         .native => "native",
         .universal => "universal",
@@ -92,6 +94,7 @@ pub fn build(b: *std.Build) void {
         "zig",
         "build",
         "-Dapp-runtime=none",
+        "-Dversion-string=0.0.0",
         "-Demit-macos-app=false",
         "-Demit-xcframework=true",
         "-Di18n=false",
@@ -106,6 +109,20 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "GhosttyKit.xcframework",
     });
     ghostty_install.step.dependOn(&ghostty_cmd.step);
+    const install_prefix = b.getInstallPath(.prefix, "");
+    const install_prefix_abs = if (std.fs.path.isAbsolute(install_prefix))
+        install_prefix
+    else
+        b.pathFromRoot(install_prefix);
+    const ghostty_install_root_cmd = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        "rm -rf \"$2\" && cp -R \"$1\" \"$2\"",
+        "--",
+        b.fmt("{s}/GhosttyKit.xcframework", .{install_prefix_abs}),
+        b.pathFromRoot("zig-out/GhosttyKit.xcframework"),
+    });
+    ghostty_install_root_cmd.step.dependOn(&ghostty_install.step);
 
     const ghostty_step = b.step(
         "ghostty-lib",
@@ -118,11 +135,6 @@ pub fn build(b: *std.Build) void {
         "Build GhosttyKit.xcframework and appify.app",
     );
     const xcodebuild_config: []const u8 = if (optimize == .Debug) "Debug" else "Release";
-    const install_prefix = b.getInstallPath(.prefix, "");
-    const install_prefix_abs = if (std.fs.path.isAbsolute(install_prefix))
-        install_prefix
-    else
-        b.pathFromRoot(install_prefix);
     const xcodebuild_cmd = b.addSystemCommand(&.{
         "xcodebuild",
         "-scheme",
@@ -132,7 +144,7 @@ pub fn build(b: *std.Build) void {
         b.fmt("CONFIGURATION_BUILD_DIR={s}", .{install_prefix_abs}),
     });
     xcodebuild_cmd.setCwd(b.path("macos/appify"));
-    xcodebuild_cmd.step.dependOn(&ghostty_install.step);
+    xcodebuild_cmd.step.dependOn(&ghostty_install_root_cmd.step);
     macos_step.dependOn(&xcodebuild_cmd.step);
 
     const template_cmd = b.addSystemCommand(&.{
