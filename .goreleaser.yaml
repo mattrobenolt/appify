@@ -27,7 +27,7 @@ checksum:
 homebrew_casks:
   - name: appify
     homepage: https://github.com/mattrobenolt/appify
-    description: Generate macOS .app bundles from terminal commands.
+    description: Turn TUI apps into real macOS applications.
     binaries:
       - appify
     repository:

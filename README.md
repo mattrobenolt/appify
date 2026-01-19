@@ -1,28 +1,30 @@
 # appify
 
-Generate macOS `.app` bundles from terminal commands. Wrap TUI applications (like `lazygit`, `btop`, `nvim`) so they appear as distinct applications in Cmd+Tab, Spotlight, and the Dock.
+Turn TUI apps into real macOS applications.
+
+On Linux, terminal apps are just... apps. They get their own windows, their own Alt+Tab entries, their own launcher icons. On macOS, they're second-class citizens—buried in terminal tabs, invisible to Cmd+Tab, forgotten by Spotlight.
+
+**appify fixes that.** Generate native `.app` bundles from any TUI. Your `btop` becomes a proper System Monitor. Your `weechat` gets its own Dock icon. GPU-accelerated rendering via an embedded Ghostty terminal engine—no existing Ghostty installation required.
 
 ## Features
 
-- **Fast & Self-Contained**: Single static CLI binary with no runtime dependencies.
-- **Native Experience**: Generates real macOS applications (Swift + GhosttyKit), not shell scripts.
-- **High Performance**: Uses the embedded Ghostty terminal engine for GPU-accelerated rendering.
-- **Customizable**: Support for custom names, bundle IDs, and icons (.icns or .png).
+- **Zero Dependencies**: Single static binary. Generated apps embed their own terminal engine—no Ghostty installation required.
+- **Native Experience**: Real macOS applications (Swift + GhosttyKit), not shell script wrappers.
+- **GPU Accelerated**: Ghostty's Metal-based renderer under the hood.
+- **Customizable**: Custom names, bundle IDs, and icons (.icns or .png).
 
 ## Installation
+
+### Homebrew
+
+```bash
+brew install --cask mattrobenolt/stuff/appify
+```
 
 ### Build from source
 
 ```bash
-zig build
-# Binary will be in zig-out/bin/appify
-```
-
-### Install
-
-```bash
-zig build
-cp zig-out/bin/appify /usr/local/bin/
+zig build -Doptimize=ReleaseFast -p /usr/local/bin/
 ```
 
 ## Usage
@@ -31,16 +33,13 @@ cp zig-out/bin/appify /usr/local/bin/
 appify <command> [options]
 ```
 
-### Arguments
-
-- `<command>` - The command to run (e.g., `/opt/homebrew/bin/lazygit` or just `lazygit`)
-
 ### Options
 
-- `-n, --name <name>` - App name for Cmd+Tab/Dock (default: derived from command)
+- `-n, --name <n>` - App name for Cmd+Tab/Dock (default: derived from command)
 - `-o, --output <path>` - Output directory (default: current directory)
 - `-i, --icon <path>` - Path to icon file (.icns or .png)
-- `-b, --bundle-id <id>` - Bundle identifier (default: com.appify.<name-lowercase>)
+- `-b, --bundle-id <id>` - Bundle identifier (default: `com.appify.<n>`)
+- `--ghostty-config <path>` - Ghostty config file to bundle with the app
 - `-h, --help` - Show help message
 - `-v, --version` - Show version
 
@@ -48,76 +47,36 @@ appify <command> [options]
 
 ```bash
 # Simple usage
-appify lazygit
+appify btop
 
 # With custom name and icon
-appify /opt/homebrew/bin/btop --name "System Monitor" --icon ./btop.icns
+appify btop --name "System Monitor" --icon ./monitor.icns
 
 # Full customization
-appify nvim --name "Neovim" --bundle-id "com.matt.neovim" --output ~/Applications
+appify weechat --name "WeeChat" --bundle-id "com.matt.weechat" --output ~/Applications
 ```
 
-## How It Works
+## Good Candidates
 
-`appify` embeds a compiled native Swift macOS application template that uses the [GhosttyKit](https://github.com/ghostty-org/ghostty) terminal library.
+Apps that work best are **destinations**, not context-dependent tools:
 
-When you run `appify`:
-1. It unpacks this template into a new `.app` bundle.
-2. It configures the app by writing a `Contents/Resources/appify.json` file:
-   ```json
-   {
-     "command": "lazygit",
-     "title": "LazyGit"
-   }
-   ```
-3. It updates `Info.plist` with your app name and bundle ID.
-4. It processes and installs your icon.
+- **System monitors**: `btop`, `bottom`, `htop`, `zenith`
+- **Chat/IRC**: `weechat`, `irssi`, `gomuks`
+- **Email**: `aerc`, `neomutt`
+- **Music**: `cmus`, `ncmpcpp`, `spotify-tui`
+- **RSS readers**: `newsboat`
+- **Calendar/TODO**: `calcurse`
 
-The resulting app is a standalone macOS application that launches a dedicated terminal window running your command.
-
-## Ghostty Config Overrides
-
-You can bundle a Ghostty config file that layers on top of the user's system config:
-
-```bash
-appify btop --ghostty-config ./btop.ghostty
-```
-
-This file is copied into the app at `Contents/Resources/appify.ghostty` and loaded after the default config files.
+Apps that need a working directory context (like `lazygit` or `nvim`) are less ideal since appified apps launch from Finder/Spotlight without that context.
 
 ## Requirements
 
-**For generated apps:**
-- macOS 11.0 or later
+**Generated apps require:**
+- macOS 11.0+
 
-**For building appify (development):**
-- Zig 0.15.2 or later
-- Xcode (for building the Swift template)
-- macOS (for `sips` utility)
-
-## Development
-
-### Run tests
-
-```bash
-# Unit tests
-zig build test
-```
-
-### Code formatting
-
-```bash
-zig fmt src/
-```
-
-## Project Structure
-
-```
-appify/
-  src/            # Zig CLI source
-  macos/          # Swift App Template source
-  build.zig       # Build configuration (Builds GhosttyKit -> Swift App -> CLI)
-```
+**Building from source requires:**
+- Zig 0.15.2
+- Xcode
 
 ## License
 
