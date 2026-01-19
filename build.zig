@@ -92,6 +92,7 @@ pub fn build(b: *std.Build) void {
         "zig",
         "build",
         "-Dapp-runtime=none",
+        "-Demit-macos-app=false",
         "-Demit-xcframework=true",
         "-Di18n=false",
         b.fmt("-Doptimize={s}", .{@tagName(optimize)}),
