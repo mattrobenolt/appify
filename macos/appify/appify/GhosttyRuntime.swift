@@ -114,8 +114,8 @@ final class GhosttyRuntime {
     ) -> Void = { _, _, _, _, _ in
     }
 
-  private static let closeSurfaceCallback:
-    @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void = { _, _ in
+  private static let closeSurfaceCallback: @convention(c) (UnsafeMutableRawPointer?, Bool) -> Void =
+    { _, _ in
       DispatchQueue.main.async {
         NSApp.terminate(nil)
       }

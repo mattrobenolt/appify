@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct appifyApp: App {
+struct AppifyApp: App {
   @NSApplicationDelegateAdaptor(AppifyAppDelegate.self) var appDelegate
   let ghostty: GhosttyRuntime
   let config: AppifyConfig

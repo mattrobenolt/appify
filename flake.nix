@@ -31,6 +31,7 @@
             zlint
             zigdoc
             gnutar
+            just
           ];
 
           shellHook = ''
