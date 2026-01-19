@@ -6,6 +6,9 @@ On Linux, terminal apps are just... apps. They get their own windows, their own 
 
 **appify fixes that.** Generate native `.app` bundles from any TUI. Your `btop` becomes a proper System Monitor. Your `weechat` gets its own Dock icon. GPU-accelerated rendering via an embedded Ghostty terminal engine—no existing Ghostty installation required.
 
+<img width="2152" height="1104" alt="CleanShot 2026-01-18 at 17 33 41@2x" src="https://github.com/user-attachments/assets/a5aa481f-02ae-4486-bce7-d59aa09d05ef" />
+
+
 ## Features
 
 - **Zero Dependencies**: Single static binary. Generated apps embed their own terminal engine—no Ghostty installation required.
