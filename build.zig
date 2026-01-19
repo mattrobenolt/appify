@@ -118,13 +118,18 @@ pub fn build(b: *std.Build) void {
         "Build GhosttyKit.xcframework and appify.app",
     );
     const xcodebuild_config: []const u8 = if (optimize == .Debug) "Debug" else "Release";
+    const install_prefix = b.getInstallPath(.prefix, "");
+    const install_prefix_abs = if (std.fs.path.isAbsolute(install_prefix))
+        install_prefix
+    else
+        b.pathFromRoot(install_prefix);
     const xcodebuild_cmd = b.addSystemCommand(&.{
         "xcodebuild",
         "-scheme",
         "appify",
         "-configuration",
         xcodebuild_config,
-        b.fmt("CONFIGURATION_BUILD_DIR={s}", .{b.getInstallPath(.prefix, "")}),
+        b.fmt("CONFIGURATION_BUILD_DIR={s}", .{install_prefix_abs}),
     });
     xcodebuild_cmd.setCwd(b.path("macos/appify"));
     xcodebuild_cmd.step.dependOn(&ghostty_install.step);

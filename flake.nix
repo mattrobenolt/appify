@@ -32,6 +32,7 @@
             zigdoc
             gnutar
             just
+            goreleaser
           ];
 
           shellHook = ''

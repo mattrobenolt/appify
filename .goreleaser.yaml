@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: appify
+
+builds:
+  - id: appify
+    builder: zig
+    binary: appify
+    targets:
+      - aarch64-macos
+    flags:
+      - -Doptimize=ReleaseFast
+
+archives:
+  - id: default
+    ids:
+      - appify
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats:
+      - tar.gz
+
+checksum:
+  name_template: 'checksums.txt'
+
+homebrew_casks:
+  - name: appify
+    homepage: https://github.com/mattrobenolt/appify
+    description: Generate macOS .app bundles from terminal commands.
+    binaries:
+      - appify
+    repository:
+      owner: mattrobenolt
+      name: homebrew-stuff
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/appify"]
+          end

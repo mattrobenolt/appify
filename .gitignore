@@ -1,6 +1,5 @@
 # Zig build artifacts
 zig-out/
-zig-cache/
 .zig-cache/
 
 # Build artifacts
@@ -40,3 +39,4 @@ result
 result-*
 
 macos/appify/build
+dist/
