@@ -10,11 +10,11 @@ const heap = std.heap;
 const testing = std.testing;
 const ascii = std.ascii;
 const builtin = @import("builtin");
+const build_options = @import("build_options");
+const version = build_options.version;
 
 const Args = @import("Args.zig");
 const bundle = @import("bundle.zig");
-
-const version = "0.1.0";
 
 const help_text =
     \\appify - Turn TUI apps into real macOS applications
@@ -40,7 +40,7 @@ const help_text =
     \\  -v, --version               Show version
     \\
     \\Notes:
-    \\  Options accept --opt=value. Use -- to pass through args that look like options.
+    \\  Use -- to pass through args that look like options.
     \\  Shell mode requires quoting the command string.
     \\
     \\Examples:
@@ -90,7 +90,7 @@ fn run(gpa: Allocator) !u8 {
             return 0;
         },
         .version => {
-            try stdout.print("appify version {s}\n", .{version});
+            try stdout.print("appify version {f}\n", .{version});
             return 0;
         },
         .err => |err| {

@@ -15,13 +15,17 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag != .macos) @panic("appify macOS build only supports macOS targets.");
     const optimize = b.standardOptimizeOption(.{});
 
+    const version_opt = b.option([]const u8, "version", "version string");
+    const version_string = if (version_opt) |version| version else @import("build.zig.zon").version;
+    const version = std.SemanticVersion.parse(version_string) catch @panic("invalid version string");
+
     const ghostty_xcframework_target = b.option(
         GhosttyXCFrameworkTarget,
         "ghostty-xcframework-target",
         "Ghostty xcframework target (native or universal).",
     ) orelse .native;
 
-    const exe = addAppifyExecutable(b, target, optimize);
+    const exe = addAppifyExecutable(b, target, optimize, version);
     b.installArtifact(exe);
 
     addRunStep(b, exe);
@@ -35,8 +39,12 @@ fn addAppifyExecutable(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    version: std.SemanticVersion,
 ) *std.Build.Step.Compile {
-    return b.addExecutable(.{
+    var options = b.addOptions();
+    options.addOption(std.SemanticVersion, "version", version);
+
+    var exe = b.addExecutable(.{
         .name = "appify",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
@@ -44,6 +52,8 @@ fn addAppifyExecutable(
             .optimize = optimize,
         }),
     });
+    exe.root_module.addOptions("build_options", options);
+    return exe;
 }
 
 fn addRunStep(b: *std.Build, exe: *std.Build.Step.Compile) void {
