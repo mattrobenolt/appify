@@ -6,16 +6,15 @@ const Io = std.Io;
 const testing = std.testing;
 const mem = std.mem;
 
-pub const PlistConfig = struct {
-    executable_name: []const u8,
-    bundle_id: []const u8,
-    display_name: []const u8,
-    has_icon: bool,
-};
+const PlistConfig = @This();
+
+executable_name: []const u8,
+bundle_id: []const u8,
+display_name: []const u8,
+has_icon: bool,
 
 /// Generate an Info.plist file with the provided configuration.
-/// The writer parameter accepts any writer type (file, buffer, etc).
-pub fn generate(writer: *Io.Writer, config: PlistConfig) !void {
+pub fn write(self: *const PlistConfig, writer: *Io.Writer) !void {
     // Write XML declaration and DOCTYPE
     try writer.writeAll(
         \\<?xml version="1.0" encoding="UTF-8"?>
@@ -25,28 +24,28 @@ pub fn generate(writer: *Io.Writer, config: PlistConfig) !void {
         \\    <key>CFBundleExecutable</key>
         \\    <string>
     );
-    try writer.writeAll(config.executable_name);
+    try writer.writeAll(self.executable_name);
     try writer.writeAll(
         \\</string>
         \\
         \\    <key>CFBundleIdentifier</key>
         \\    <string>
     );
-    try writer.writeAll(config.bundle_id);
+    try writer.writeAll(self.bundle_id);
     try writer.writeAll(
         \\</string>
         \\
         \\    <key>CFBundleName</key>
         \\    <string>
     );
-    try writer.writeAll(config.display_name);
+    try writer.writeAll(self.display_name);
     try writer.writeAll(
         \\</string>
         \\
         \\    <key>CFBundleDisplayName</key>
         \\    <string>
     );
-    try writer.writeAll(config.display_name);
+    try writer.writeAll(self.display_name);
     try writer.writeAll(
         \\</string>
         \\
@@ -63,7 +62,7 @@ pub fn generate(writer: *Io.Writer, config: PlistConfig) !void {
     );
 
     // Only include CFBundleIconFile if icon is present
-    if (config.has_icon) {
+    if (self.has_icon) {
         try writer.writeAll(
             \\    <key>CFBundleIconFile</key>
             \\    <string>AppIcon</string>
@@ -99,12 +98,12 @@ test "plist generation without icon" {
         .has_icon = false,
     };
 
-    var buffer: std.ArrayList(u8) = .empty;
-    defer buffer.deinit(allocator);
+    var writer: Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
 
-    try generate(buffer.writer(allocator), config);
+    try config.write(&writer.writer);
 
-    const output = try buffer.toOwnedSlice(allocator);
+    const output = try writer.toOwnedSlice();
     defer allocator.free(output);
 
     // Verify essential keys are present
@@ -129,12 +128,12 @@ test "plist generation with icon" {
         .has_icon = true,
     };
 
-    var buffer: std.ArrayList(u8) = .empty;
-    defer buffer.deinit(allocator);
+    var writer: Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
 
-    try generate(buffer.writer(allocator), config);
+    try config.write(&writer.writer);
 
-    const output = try buffer.toOwnedSlice(allocator);
+    const output = try writer.toOwnedSlice();
     defer allocator.free(output);
 
     // Verify icon key IS present
@@ -152,12 +151,12 @@ test "plist generation with special characters in name" {
         .has_icon = false,
     };
 
-    var buffer: std.ArrayList(u8) = .empty;
-    defer buffer.deinit(allocator);
+    var writer: Io.Writer.Allocating = .init(allocator);
+    defer writer.deinit();
 
-    try generate(buffer.writer(allocator), config);
+    try config.write(&writer.writer);
 
-    const output = try buffer.toOwnedSlice(allocator);
+    const output = try writer.toOwnedSlice();
     defer allocator.free(output);
 
     // Verify spaces are preserved in names

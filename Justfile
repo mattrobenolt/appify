@@ -19,10 +19,10 @@ lint: fmt-check
     zlint
 
 test:
-    zig build test
+    zig build test --summary all
 
 run *args:
-    zig build run -- {{args}}
+    zig build run -- {{ args }}
 
 clean:
     rm -rf zig-out .zig-cache

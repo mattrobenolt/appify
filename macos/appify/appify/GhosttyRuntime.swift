@@ -31,7 +31,22 @@ final class GhosttyRuntime {
     ghostty_config_load_default_files(config)
     ghostty_config_load_cli_args(config)
     ghostty_config_load_recursive_files(config)
+    if let configUrl = Bundle.main.url(forResource: "appify", withExtension: "ghostty") {
+      configUrl.path.withCString { ghostty_config_load_file(config, $0) }
+    }
     ghostty_config_finalize(config)
+
+    if ProcessInfo.processInfo.environment["APPIFY_DEBUG_CONFIG"] == "1" {
+      var bg = ghostty_config_color_s()
+      let key = "background"
+      key.withCString { keyPtr in
+        _ = ghostty_config_get(config, &bg, keyPtr, UInt(strlen(keyPtr)))
+      }
+      NSLog(
+        "appify config background = #%02X%02X%02X",
+        bg.r, bg.g, bg.b
+      )
+    }
 
     var runtimeConfig = ghostty_runtime_config_s()
     runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()
@@ -139,10 +154,6 @@ final class GhosttyRuntime {
       args.append(arg0)
     } else {
       args.append("appify")
-    }
-
-    if let configUrl = Bundle.main.url(forResource: "appify", withExtension: "ghostty") {
-      args.append("--config-file=\(configUrl.path)")
     }
 
     let storage = args.map { makeCString($0) }

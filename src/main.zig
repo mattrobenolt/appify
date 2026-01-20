@@ -4,20 +4,23 @@
 const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
-const process = std.process;
+const Io = std.Io;
 const Allocator = mem.Allocator;
 const heap = std.heap;
 const testing = std.testing;
+const ascii = std.ascii;
 const builtin = @import("builtin");
 
+const Args = @import("Args.zig");
 const bundle = @import("bundle.zig");
 
 const version = "0.1.0";
 
 const help_text =
-    \\appify - Generate macOS .app bundles from terminal commands
+    \\appify - Turn TUI apps into real macOS applications
     \\
-    \\Usage: appify <command> [options]
+    \\Usage: appify [options] <command> [command-args...]
+    \\       appify [options] -- <command> [args...]
     \\
     \\Arguments:
     \\  <command>    The command to run (e.g., "/opt/homebrew/bin/lazygit" or "lazygit")
@@ -26,16 +29,27 @@ const help_text =
     \\  -n, --name <name>           App name for Cmd+Tab/Dock (default: derived from command)
     \\  -o, --output <path>         Output directory (default: current directory)
     \\  -i, --icon <path>           Path to icon file (.icns or .png)
-    \\  -b, --bundle-id <id>        Bundle identifier (default: com.appify.<name-lowercase>)
+    \\  -b, --bundle-id <id>        Bundle identifier (default: com.withmatt.appify.<name-lowercase>)
+    \\  --cwd <path>                Working directory for the command
+    \\  --width <points>            Initial window width in points
+    \\  --height <points>           Initial window height in points
     \\  --ghostty-config <path>     Ghostty config override file (optional)
+    \\  --shell                     Run command through 'sh -c' for shell features
     \\
     \\  -h, --help                  Show this help message
     \\  -v, --version               Show version
     \\
+    \\Notes:
+    \\  Options accept --opt=value. Use -- to pass through args that look like options.
+    \\  Shell mode requires quoting the command string.
+    \\
     \\Examples:
     \\  appify lazygit
     \\  appify /opt/homebrew/bin/btop --name "System Monitor" --icon ./btop.icns
+    \\  appify nvim -u init.vim
     \\  appify nvim --name "Neovim" --bundle-id "com.matt.neovim" --output ~/Applications
+    \\  appify --name "WeeChat" -- weechat --dir ~/irc
+    \\  appify --shell 'cd /dir && ./run'
     \\
 ;
 
@@ -45,19 +59,7 @@ const stdout = &stdout_writer.interface;
 
 var debug_allocator: heap.DebugAllocator(.{}) = .init;
 
-const ParsedArgs = struct {
-    command: ?[]const u8 = null,
-    name: ?[]const u8 = null,
-    output_dir: ?[]const u8 = null,
-    icon_path: ?[]const u8 = null,
-    bundle_id: ?[]const u8 = null,
-    ghostty_config_path: ?[]const u8 = null,
-    show_help: bool = false,
-    show_version: bool = false,
-};
-
-pub fn main() !void {
-    // Set up allocator
+pub fn main() u8 {
     const gpa, const is_debug = gpa: {
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
@@ -69,111 +71,98 @@ pub fn main() !void {
     };
     defer stdout.flush() catch {};
 
-    // Use arena for temporary CLI parsing allocations
     var arena: heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    // Parse arguments
-    const args = try parseArgs();
+    const code = run(allocator) catch |err| {
+        printError("unexpected error: {s}", .{@errorName(err)});
+        return 1;
+    };
+    return code;
+}
 
-    // Handle help and version flags
-    if (args.show_help) {
-        try stdout.writeAll(help_text);
-        return;
-    }
-
-    if (args.show_version) {
-        try stdout.print("appify version {s}\n", .{version});
-        return;
-    }
+fn run(gpa: Allocator) !u8 {
+    const parsed = try Args.parse(gpa);
+    const args = switch (parsed) {
+        .help => {
+            try stdout.writeAll(help_text);
+            return 0;
+        },
+        .version => {
+            try stdout.print("appify version {s}\n", .{version});
+            return 0;
+        },
+        .err => |err| {
+            reportParseError(err);
+            return 1;
+        },
+        .run => |run_args| run_args,
+    };
 
     // Validate command is provided
-    const command = args.command orelse {
-        die("missing required argument: <command>", .{});
-    };
+    const command = args.command;
+    const command_line = args.command_line;
 
     // Derive defaults
     const name = args.name orelse deriveAppName(command);
     const output_dir = args.output_dir orelse ".";
-    const bundle_id = args.bundle_id orelse try deriveBundleId(allocator, name);
+    const bundle_id = args.bundle_id orelse try deriveBundleId(gpa, name);
+
+    const root = fs.cwd();
 
     // Validate output directory exists
-    fs.cwd().access(output_dir, .{}) catch {
-        die("output directory does not exist: {s}", .{output_dir});
+    root.access(output_dir, .{}) catch {
+        printError("output directory does not exist: {s}", .{output_dir});
+        return 1;
     };
 
     // Validate icon file exists if provided
     if (args.icon_path) |icon_path| {
-        fs.cwd().access(icon_path, .{}) catch {
-            die("icon file not found: {s}", .{icon_path});
+        root.access(icon_path, .{}) catch {
+            printError("icon file not found: {s}", .{icon_path});
+            return 1;
         };
     }
-    if (args.ghostty_config_path) |ghostty_config_path| {
-        fs.cwd().access(ghostty_config_path, .{}) catch {
-            die("ghostty config file not found: {s}", .{ghostty_config_path});
+    if (args.ghostty_config) |ghostty_config| {
+        root.access(ghostty_config, .{}) catch {
+            printError("ghostty config file not found: {s}", .{ghostty_config});
+            return 1;
+        };
+    }
+    if (args.cwd) |cwd| {
+        root.access(cwd, .{}) catch {
+            printError("working directory does not exist: {s}", .{cwd});
+            return 1;
         };
     }
 
     // Create bundle config
     const config: bundle.Config = .{
-        .command = command,
+        .command = command_line,
         .name = name,
         .output_dir = output_dir,
         .bundle_id = bundle_id,
         .icon_path = args.icon_path,
-        .ghostty_config_path = args.ghostty_config_path,
+        .cwd = args.cwd,
+        .width = args.width,
+        .height = args.height,
+        .ghostty_config = args.ghostty_config,
     };
 
     // Generate the app bundle
-    bundle.generate(allocator, config) catch |err| {
+    config.generate(gpa, root) catch |err| {
         switch (err) {
-            error.FileNotFound => die("file not found during bundle generation", .{}),
-            error.AccessDenied => die("permission denied", .{}),
-            else => die("failed to generate app bundle: {s}", .{@errorName(err)}),
+            error.FileNotFound => printError("file not found during bundle generation", .{}),
+            error.AccessDenied => printError("permission denied", .{}),
+            else => printError("failed to generate app bundle: {s}", .{@errorName(err)}),
         }
+        return 1;
     };
 
     // Success - print confirmation
     try stdout.print("Created {s}.app in {s}\n", .{ name, output_dir });
-}
-
-/// Parse command line arguments into ParsedArgs struct.
-fn parseArgs() !ParsedArgs {
-    var result: ParsedArgs = .{};
-    var args = process.args();
-    defer args.deinit();
-
-    _ = args.skip(); // Skip program name
-
-    while (args.next()) |arg| {
-        if (mem.eql(u8, arg, "-h") or mem.eql(u8, arg, "--help")) {
-            result.show_help = true;
-        } else if (mem.eql(u8, arg, "-v") or mem.eql(u8, arg, "--version")) {
-            result.show_version = true;
-        } else if (mem.eql(u8, arg, "-n") or mem.eql(u8, arg, "--name")) {
-            result.name = args.next() orelse die("missing value for {s}", .{arg});
-        } else if (mem.eql(u8, arg, "-o") or mem.eql(u8, arg, "--output")) {
-            result.output_dir = args.next() orelse die("missing value for {s}", .{arg});
-        } else if (mem.eql(u8, arg, "-i") or mem.eql(u8, arg, "--icon")) {
-            result.icon_path = args.next() orelse die("missing value for {s}", .{arg});
-        } else if (mem.eql(u8, arg, "-b") or mem.eql(u8, arg, "--bundle-id")) {
-            result.bundle_id = args.next() orelse die("missing value for {s}", .{arg});
-        } else if (mem.eql(u8, arg, "--ghostty-config")) {
-            result.ghostty_config_path = args.next() orelse die("missing value for {s}", .{arg});
-        } else if (mem.startsWith(u8, arg, "-")) {
-            die("unknown option: {s}", .{arg});
-        } else {
-            // First non-flag argument is the command
-            if (result.command == null) {
-                result.command = arg;
-            } else {
-                die("unexpected argument: {s}", .{arg});
-            }
-        }
-    }
-
-    return result;
+    return 0;
 }
 
 /// Derive app name from command basename.
@@ -184,33 +173,46 @@ fn deriveAppName(command: []const u8) []const u8 {
 }
 
 /// Derive bundle identifier from app name.
-fn deriveBundleId(allocator: Allocator, name: []const u8) ![]const u8 {
-    // Convert name to lowercase for bundle ID
-    const result = try allocator.alloc(u8, name.len);
-    defer allocator.free(result);
+fn deriveBundleId(gpa: Allocator, name: []const u8) ![]const u8 {
+    var buffer: [255]u8 = undefined;
+    var writer: Io.Writer = .fixed(&buffer);
 
-    for (name, 0..) |c, i| {
-        result[i] = switch (c) {
-            ' ' => '-',
-            else => std.ascii.toLower(c),
-        };
+    var prev_sep = true;
+    for (name) |c| {
+        if (ascii.isAlphanumeric(c)) {
+            try writer.writeByte(ascii.toLower(c));
+            prev_sep = false;
+        } else if (!prev_sep) {
+            try writer.writeByte('-');
+            prev_sep = true;
+        }
     }
 
-    return std.fmt.allocPrint(allocator, "com.appify.{s}", .{result});
+    return std.fmt.allocPrint(gpa, "com.withmatt.appify.{s}", .{writer.buffered()});
+}
+
+fn reportParseError(err: Args.ParseError) void {
+    switch (err) {
+        .missing_value => |opt| printError("missing value for {s}", .{opt}),
+        .invalid_value => |info| printError("invalid value for {s}: {s}", .{ info.option, info.value }),
+        .unknown_option => |opt| printError("unknown option: {s}", .{opt}),
+        .missing_command => printError("missing required argument: <command>", .{}),
+    }
 }
 
 /// Print error message to stderr.
-fn die(comptime fmt: []const u8, args: anytype) noreturn {
+fn printError(comptime fmt: []const u8, args: anytype) void {
     var stderr_buffer: [1024]u8 = undefined;
     var stderr_writer = fs.File.stderr().writer(&stderr_buffer);
     const stderr = &stderr_writer.interface;
 
     stderr.print("error: " ++ fmt ++ "\n", args) catch {};
     stderr.flush() catch {};
-    std.process.exit(1);
 }
 
-// Tests
+test {
+    testing.refAllDeclsRecursive(@This());
+}
 
 test "deriveAppName from simple command" {
     const name = deriveAppName("lazygit");
@@ -227,7 +229,7 @@ test "deriveBundleId from simple name" {
     const bundle_id = try deriveBundleId(allocator, "LazyGit");
     defer allocator.free(bundle_id);
 
-    try testing.expectEqualStrings("com.appify.lazygit", bundle_id);
+    try testing.expectEqualStrings("com.withmatt.appify.lazygit", bundle_id);
 }
 
 test "deriveBundleId with spaces" {
@@ -235,5 +237,21 @@ test "deriveBundleId with spaces" {
     const bundle_id = try deriveBundleId(allocator, "My App");
     defer allocator.free(bundle_id);
 
-    try testing.expectEqualStrings("com.appify.my-app", bundle_id);
+    try testing.expectEqualStrings("com.withmatt.appify.my-app", bundle_id);
+}
+
+test "deriveBundleId strips punctuation" {
+    const allocator = testing.allocator;
+    const bundle_id = try deriveBundleId(allocator, "My@App!");
+    defer allocator.free(bundle_id);
+
+    try testing.expectEqualStrings("com.withmatt.appify.my-app-", bundle_id);
+}
+
+test "deriveBundleId allows numeric start" {
+    const allocator = testing.allocator;
+    const bundle_id = try deriveBundleId(allocator, "123 App");
+    defer allocator.free(bundle_id);
+
+    try testing.expectEqualStrings("com.withmatt.appify.123-app", bundle_id);
 }

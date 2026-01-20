@@ -1,0 +1,45 @@
+diff --git a/src/config/CApi.zig b/src/config/CApi.zig
+index 65f35151b..7f7b64a3d 100644
+--- a/src/config/CApi.zig
++++ b/src/config/CApi.zig
+@@ -45,7 +45,27 @@ export fn ghostty_config_load_default_files(self: *Config) void {
+     };
+ }
+ 
++/// Load the configuration from a specific file path.
++/// Path must be absolute or resolvable from the current working directory.
++export fn ghostty_config_load_file(self: *Config, path: [*:0]const u8) void {
++    const slice = std.mem.sliceTo(path, 0);
++    if (slice.len == 0) return;
++
++    var buf: [std.fs.max_path_bytes]u8 = undefined;
++    const resolved = if (std.fs.path.isAbsolute(slice))
++        slice
++    else
++        std.fs.cwd().realpath(slice, &buf) catch |err| {
++            log.err("error resolving config path err={}", .{err});
++            return;
++        };
++
++    self.loadFile(state.alloc, resolved) catch |err| {
++        log.err("error loading config file err={}", .{err});
++    };
++}
++
+ /// Load the configuration from the user-specified configuration
+ /// file locations in the previously loaded configuration. This will
+ /// recursively continue to load up to a built-in limit.
+ export fn ghostty_config_load_recursive_files(self: *Config) void {
+diff --git a/include/ghostty.h b/include/ghostty.h
+index 04786fdc2..b4d7f5d4b 100644
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1016,6 +1016,7 @@ ghostty_config_t ghostty_config_new();
+ void ghostty_config_free(ghostty_config_t);
+ ghostty_config_t ghostty_config_clone(ghostty_config_t);
+ void ghostty_config_load_cli_args(ghostty_config_t);
+ void ghostty_config_load_default_files(ghostty_config_t);
++void ghostty_config_load_file(ghostty_config_t, const char*);
+ void ghostty_config_load_recursive_files(ghostty_config_t);
+ void ghostty_config_finalize(ghostty_config_t);
+ bool ghostty_config_get(ghostty_config_t, void*, const char*, uintptr_t);

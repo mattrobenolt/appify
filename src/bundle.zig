@@ -5,16 +5,14 @@ const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
 const tar = std.tar;
-const posix = std.posix;
 const Allocator = mem.Allocator;
-const json = std.json;
 const Io = std.Io;
-const testing = std.testing;
 
 const embedded_template_tar = @import("template_tar").data;
 
 const icon = @import("icon.zig");
-const plist = @import("plist.zig");
+const PlistConfig = @import("PlistConfig.zig");
+const RuntimeConfig = @import("RuntimeConfig.zig");
 
 pub const Config = struct {
     command: []const u8,
@@ -22,156 +20,88 @@ pub const Config = struct {
     output_dir: []const u8,
     bundle_id: []const u8,
     icon_path: ?[]const u8,
-    ghostty_config_path: ?[]const u8 = null,
-};
+    cwd: ?[]const u8 = null,
+    width: ?u32 = null,
+    height: ?u32 = null,
+    ghostty_config: ?[]const u8 = null,
 
-/// Generate a complete .app bundle from the provided configuration.
-pub fn generate(allocator: Allocator, config: Config) !void {
-    // Construct full app bundle path
-    const app_name_with_ext = try std.fmt.allocPrint(allocator, "{s}.app", .{config.name});
-    defer allocator.free(app_name_with_ext);
+    /// Generate a complete .app bundle from the provided configuration.
+    pub fn generate(self: *const Config, gpa: Allocator, root: fs.Dir) !void {
+        var output_dir = try root.openDir(self.output_dir, .{});
+        defer output_dir.close();
 
-    const app_path = try fs.path.join(
-        allocator,
-        &.{ config.output_dir, app_name_with_ext },
-    );
-    defer allocator.free(app_path);
+        var app_name_buf: [fs.max_name_bytes]u8 = undefined;
+        const app_name_with_ext = try std.fmt.bufPrint(&app_name_buf, "{s}.app", .{self.name});
 
-    // Remove existing bundle if present (overwrite behavior)
-    fs.cwd().deleteTree(app_path) catch |err| {
-        // Ignore error if directory doesn't exist
-        if (err != error.FileNotFound) {
-            return err;
+        // Remove existing bundle if present (overwrite behavior)
+        output_dir.deleteTree(app_name_with_ext) catch |err| {
+            // Ignore error if directory doesn't exist
+            if (err != error.FileNotFound) return err;
+        };
+
+        try output_dir.makePath(app_name_with_ext);
+        var app_dir = try output_dir.openDir(app_name_with_ext, .{});
+        defer app_dir.close();
+
+        try extractEmbeddedTemplate(app_dir);
+
+        var contents_dir = try app_dir.openDir("Contents", .{});
+        defer contents_dir.close();
+
+        var macos_dir = try contents_dir.openDir("MacOS", .{});
+        defer macos_dir.close();
+
+        var resources_dir = try contents_dir.openDir("Resources", .{});
+        defer resources_dir.close();
+
+        const plist_config: PlistConfig = .{
+            .executable_name = "appify",
+            .bundle_id = self.bundle_id,
+            .display_name = self.name,
+            .has_icon = self.icon_path != null,
+        };
+
+        try writeConfig(contents_dir, "Info.plist", &plist_config);
+
+        // Process icon if provided
+        if (self.icon_path) |icon_path| {
+            try icon.process(gpa, root, icon_path, resources_dir);
         }
-    };
 
-    try extractEmbeddedTemplate(app_path);
+        if (self.ghostty_config) |ghostty_config| {
+            try copyGhosttyConfig(root, ghostty_config, resources_dir);
+        }
 
-    // Construct paths for subdirectories
-    const contents_path = try fs.path.join(allocator, &.{ app_path, "Contents" });
-    defer allocator.free(contents_path);
+        const runtime_config: RuntimeConfig = .init(self);
+        try writeConfig(resources_dir, "appify.json", &runtime_config);
 
-    const macos_path = try fs.path.join(allocator, &.{ contents_path, "MacOS" });
-    defer allocator.free(macos_path);
-
-    const resources_path = try fs.path.join(allocator, &.{ contents_path, "Resources" });
-    defer allocator.free(resources_path);
-
-    // Write Info.plist
-    const plist_path = try fs.path.join(allocator, &.{ contents_path, "Info.plist" });
-    defer allocator.free(plist_path);
-
-    const plist_file = try fs.cwd().createFile(plist_path, .{});
-    defer plist_file.close();
-
-    var plist_buffer: [4096]u8 = undefined;
-    var plist_writer = plist_file.writer(&plist_buffer);
-
-    const plist_config: plist.PlistConfig = .{
-        .executable_name = "appify",
-        .bundle_id = config.bundle_id,
-        .display_name = config.name,
-        .has_icon = config.icon_path != null,
-    };
-
-    try plist.generate(&plist_writer.interface, plist_config);
-
-    // Flush the buffered data to the file
-    try plist_writer.end();
-
-    // Process icon if provided
-    if (config.icon_path) |icon_path| {
-        try icon.process(allocator, icon_path, resources_path);
+        var launcher_file = try macos_dir.openFile("appify", .{});
+        defer launcher_file.close();
+        try launcher_file.chmod(0o755);
     }
-
-    if (config.ghostty_config_path) |ghostty_config_path| {
-        try copyGhosttyConfig(allocator, ghostty_config_path, resources_path);
-    }
-
-    try writeAppifyConfig(allocator, resources_path, config);
-
-    const launcher_path = try fs.path.join(allocator, &.{ macos_path, "appify" });
-    defer allocator.free(launcher_path);
-
-    // Make launcher executable
-    try makeExecutable(launcher_path);
-}
-
-/// Make the launcher script executable using fchmodat.
-fn makeExecutable(path: []const u8) !void {
-    // Use posix.fchmodat to set executable permissions
-    // Mode 0o755 = rwxr-xr-x
-    try posix.fchmodat(posix.AT.FDCWD, path, 0o755, 0);
-}
+};
 
 fn copyGhosttyConfig(
-    allocator: Allocator,
+    source_dir: fs.Dir,
     ghostty_config_path: []const u8,
-    resources_path: []const u8,
+    resources_dir: fs.Dir,
 ) !void {
-    const dest_path = try fs.path.join(allocator, &.{ resources_path, "appify.ghostty" });
-    defer allocator.free(dest_path);
-    try fs.cwd().copyFile(ghostty_config_path, fs.cwd(), dest_path, .{});
+    try source_dir.copyFile(ghostty_config_path, resources_dir, "appify.ghostty", .{});
 }
 
-const AppifyRuntimeConfig = struct {
-    command: []const u8,
-    title: []const u8,
-    cwd: ?[]const u8 = null,
-};
-
-fn writeAppifyConfig(allocator: Allocator, resources_path: []const u8, config: Config) !void {
-    const config_path = try fs.path.join(allocator, &.{ resources_path, "appify.json" });
-    defer allocator.free(config_path);
-
-    const file = try fs.cwd().createFile(config_path, .{ .truncate = true });
+fn writeConfig(dir: fs.Dir, name: []const u8, config: anytype) !void {
+    const file = try dir.createFile(name, .{});
     defer file.close();
 
-    const runtime_config: AppifyRuntimeConfig = .{
-        .command = config.command,
-        .title = config.name,
-        .cwd = null,
-    };
+    var buffer: [1024]u8 = undefined;
+    var file_writer = file.writer(&buffer);
+    const writer = &file_writer.interface;
 
-    var buffer: [4096]u8 = undefined;
-    var writer = file.writer(&buffer);
-    try writer.interface.print(
-        "{f}\n",
-        .{json.fmt(runtime_config, .{ .whitespace = .indent_2 })},
-    );
-    try writer.end();
+    try config.write(writer);
+    try file_writer.end();
 }
 
-fn extractEmbeddedTemplate(app_path: []const u8) !void {
-    try fs.cwd().makePath(app_path);
-    var dir = try fs.cwd().openDir(app_path, .{});
-    defer dir.close();
-
+fn extractEmbeddedTemplate(dir: fs.Dir) !void {
     var reader: Io.Reader = .fixed(embedded_template_tar);
     try tar.pipeToFileSystem(dir, &reader, .{});
-}
-
-// Tests
-
-test "appify config json" {
-    const allocator = testing.allocator;
-
-    var out: Io.Writer.Allocating = .init(allocator);
-    defer out.deinit();
-
-    const runtime_config: AppifyRuntimeConfig = .{
-        .command = "lazygit",
-        .title = "LazyGit",
-        .cwd = null,
-    };
-
-    try out.writer.print(
-        "{f}",
-        .{json.fmt(runtime_config, .{ .whitespace = .indent_2 })},
-    );
-
-    const output = out.written();
-
-    try testing.expect(mem.indexOf(u8, output, "\"command\": \"lazygit\"") != null);
-    try testing.expect(mem.indexOf(u8, output, "\"title\": \"LazyGit\"") != null);
 }

@@ -11,7 +11,7 @@ On Linux, terminal apps are just... apps. They get their own windows, their own 
 
 ## Features
 
-- **Zero Dependencies**: Single static binary. Generated apps embed their own terminal engine—no Ghostty installation required.
+- **Zero Dependencies**: Single binary. Generated apps embed their own terminal engine—no Ghostty installation required.
 - **Native Experience**: Real macOS applications (Swift + GhosttyKit), not shell script wrappers.
 - **GPU Accelerated**: Ghostty's Metal-based renderer under the hood.
 - **Customizable**: Custom names, bundle IDs, and icons (.icns or .png).
@@ -27,13 +27,14 @@ brew install --cask mattrobenolt/stuff/appify
 ### Build from source
 
 ```bash
-zig build -Doptimize=ReleaseFast -p /usr/local/bin/
+zig build -Doptimize=ReleaseFast -p /usr/local
 ```
 
 ## Usage
 
 ```bash
-appify <command> [options]
+appify [options] <command> [command-args...]
+appify [options] -- <command> [args...]
 ```
 
 ### Options
@@ -41,10 +42,18 @@ appify <command> [options]
 - `-n, --name <n>` - App name for Cmd+Tab/Dock (default: derived from command)
 - `-o, --output <path>` - Output directory (default: current directory)
 - `-i, --icon <path>` - Path to icon file (.icns or .png)
-- `-b, --bundle-id <id>` - Bundle identifier (default: `com.appify.<n>`)
+- `-b, --bundle-id <id>` - Bundle identifier (default: `com.withmatt.appify.<n>`)
+- `--cwd <path>` - Working directory for the command
+- `--width <points>` - Initial window width in points
+- `--height <points>` - Initial window height in points
 - `--ghostty-config <path>` - Ghostty config file to bundle with the app
+- `--shell` - Run command through `sh -c` for shell features
 - `-h, --help` - Show help message
 - `-v, --version` - Show version
+
+Notes:
+- Options accept `--opt=value`. Use `--` to pass through args that look like options.
+- Shell mode requires quoting the command string.
 
 ### Examples
 
@@ -57,6 +66,13 @@ appify btop --name "System Monitor" --icon ./monitor.icns
 
 # Full customization
 appify weechat --name "WeeChat" --bundle-id "com.matt.weechat" --output ~/Applications
+
+# Pass arguments to the command
+appify nvim -u init.vim
+appify --name "WeeChat" -- weechat --dir ~/irc
+
+# Shell features
+appify --shell 'cd /dir && ./run'
 ```
 
 ## Good Candidates

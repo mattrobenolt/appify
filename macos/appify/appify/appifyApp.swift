@@ -19,7 +19,7 @@ struct AppifyApp: App {
         config: config
       )
     }
-    .defaultSize(width: 800, height: 600)  // Force initial size
+    .defaultSize(width: config.resolvedWidth, height: config.resolvedHeight)
     .commands {
       CommandGroup(replacing: .newItem) {}  // Prevent cmd+N
     }

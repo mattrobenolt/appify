@@ -19,26 +19,25 @@ The build process is multi-stage:
 4.  Builds the final `appify` CLI.
 
 ```bash
-zig build                    # Build everything (CLI + Template)
-zig build -Doptimize=ReleaseFast  # Build optimized release version
+just build                    # Build everything (CLI + Template)
+just build-release            # Build optimized release version
 ```
 
 ### Testing
 ```bash
-zig build test              # Run unit tests
-./test-integration.sh       # Run integration tests (requires build first)
+just test              # Run unit tests
 ```
 
 ### Running
 ```bash
-zig build run -- <command> [options]   # Build and run CLI with arguments
-./zig-out/bin/appify <command>         # Run built binary directly
+just run <command> [options]        # Build and run CLI with arguments
+./zig-out/bin/appify <command>      # Run built binary directly
 ```
 
 ### Code Formatting
 ```bash
-zig fmt src/                # Format Zig source files
-zig fmt --check src/        # Check formatting without modifying
+just fmt                # Format source files
+just fmt-check          # Check formatting without modifying
 ```
 
 ## Code Architecture
@@ -117,10 +116,8 @@ This project follows conventions documented in `ZIG_STYLE.md`.
 - Tests logic in `bundle.zig`, `plist.zig`, etc.
 - Mocks file system operations where possible or uses temp dirs.
 
-### Integration Tests (`./test-integration.sh`)
-- Generates actual apps.
-- Verifies directory structure and file content.
-- Ensures the generated app has the correct structure (Contents/MacOS, Info.plist, Resources).
+### Integration Tests
+- None currently. Consider adding one later if needed.
 
 ## Key Implementation Details
 

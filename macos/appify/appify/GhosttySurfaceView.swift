@@ -8,6 +8,8 @@ final class GhosttySurfaceView: NSView {
   private let commandCString: [CChar]
   private let cwdCString: [CChar]?
   private let defaultTitle: String
+  private let initialWindowSize: NSSize
+  private let wantsCustomSize: Bool
   private let envVars: [ghostty_env_var_s]
   private let envKeyStorage: [[CChar]]
   private let envValueStorage: [[CChar]]
@@ -15,6 +17,7 @@ final class GhosttySurfaceView: NSView {
   private var markedText = NSMutableAttributedString()
   private var pendingTitle: String?
   private var trackingArea: NSTrackingArea?
+  private var didApplyInitialSize = false
 
   init(app: ghostty_app_t, config: AppifyConfig) {
     self.app = app
@@ -22,6 +25,11 @@ final class GhosttySurfaceView: NSView {
     self.commandCString = Array(command.utf8CString)
     self.cwdCString = config.cwd.map { Array($0.utf8CString) }
     self.defaultTitle = config.resolvedTitle
+    self.initialWindowSize = NSSize(
+      width: config.resolvedWidth,
+      height: config.resolvedHeight
+    )
+    self.wantsCustomSize = config.hasCustomSize
 
     let envPairs = config.envPairs
     var keyStorage: [[CChar]] = []
@@ -43,7 +51,13 @@ final class GhosttySurfaceView: NSView {
     self.envValueStorage = valueStorage
     self.envVars = vars
 
-    super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+    super.init(
+      frame: NSRect(
+        x: 0,
+        y: 0,
+        width: initialWindowSize.width,
+        height: initialWindowSize.height
+      ))
     createSurface()
   }
 
@@ -61,6 +75,7 @@ final class GhosttySurfaceView: NSView {
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
+    applyInitialWindowSizeIfNeeded()
     updateSurfaceSize()
     updateTrackingAreas()
   }
@@ -360,6 +375,21 @@ final class GhosttySurfaceView: NSView {
 
     let fbRect = convertToBacking(bounds)
     ghostty_surface_set_size(surface, UInt32(fbRect.width), UInt32(fbRect.height))
+  }
+
+  private func applyInitialWindowSizeIfNeeded() {
+    guard wantsCustomSize, !didApplyInitialSize, let window else { return }
+    window.isRestorable = false
+    window.setFrameAutosaveName("")
+    didApplyInitialSize = true
+    DispatchQueue.main.async {
+      let currentSize = window.contentLayoutRect.size
+      if currentSize.width != self.initialWindowSize.width
+        || currentSize.height != self.initialWindowSize.height
+      {
+        window.setContentSize(self.initialWindowSize)
+      }
+    }
   }
 
   private func keyAction(

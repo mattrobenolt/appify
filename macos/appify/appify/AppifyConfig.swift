@@ -5,6 +5,8 @@ struct AppifyConfig: Codable {
   var title: String?
   var cwd: String?
   var env: [String: String]?
+  var width: Double?
+  var height: Double?
 
   static func load() -> AppifyConfig {
     guard let url = Bundle.main.url(forResource: "appify", withExtension: "json") else {
@@ -34,5 +36,24 @@ struct AppifyConfig: Codable {
 
   var envPairs: [(String, String)] {
     return (env ?? [:]).map { ($0.key, $0.value) }
+  }
+
+  var resolvedWidth: Double {
+    return AppifyConfig.sanitizedDimension(width, defaultValue: 800)
+  }
+
+  var resolvedHeight: Double {
+    return AppifyConfig.sanitizedDimension(height, defaultValue: 600)
+  }
+
+  var hasCustomSize: Bool {
+    return width != nil || height != nil
+  }
+
+  private static func sanitizedDimension(_ value: Double?, defaultValue: Double) -> Double {
+    guard let value, value > 0 else {
+      return defaultValue
+    }
+    return value
   }
 }
